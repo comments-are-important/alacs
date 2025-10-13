@@ -1,9 +1,9 @@
-import re
-from abc import abstractmethod
+import re, threading
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence, Callable, Iterator
 from io import StringIO
 from pathlib import Path
-from typing import Any, Optional, Self, ClassVar, TypeVar, TextIO
+from typing import Any, Optional, Self, Iterable, ClassVar, TypeVar, TextIO
 
 
 anyTextIO = TypeVar('anyTextIO', bound=TextIO)
@@ -11,81 +11,67 @@ anyBreakChar = re.compile(r'[\f\n\r\v\u2028\u2029]')
 
 
 class Indent(str):
-    _instances: ClassVar[list['Indent']] = []
-
-    @staticmethod
-    def of(value: int | str) -> 'Indent':
-        if isinstance(value, str):
-            line = value
-            value = 0
-            while line.count('\t', value, value+1):
-                value += 1
-        if value < 0:
-            raise ValueError("Indent can't be negative")
-        if not Indent._instances:
-            Indent('')  # added in __init__
-        while len(Indent._instances) <= value:
-            Indent(Indent._instances[-1] + '\t')  # added in __init__
-        return Indent._instances[value]
+    _more:Optional['Indent']=None
+    _less:Optional['Indent']=None
 
     def __init__(self, handled_by_str_new_but_here_for_linting: Any):
-        if not (len(self) == len(Indent._instances) == self.count('\t')):
-            raise RuntimeError("use 'of', 'more', or 'less' (not constructor)")
-        Indent._instances.append(self)
-        self.hash = f"{self}#"
+        if self.count('\t') != len(self):
+            raise ValueError("indent must be tab chars")
 
     def more(self) -> 'Indent':
-        return Indent.of(len(self) + 1)
+        result = self._more
+        if result is None:
+            result = self._more = Indent(self + '\t')
+            result._less = self
+        return result
 
     def less(self) -> 'Indent':
-        return Indent.of(len(self) - 1)
+        result = self._less
+        if result is None:
+            raise ValueError("no negative indent")
+        return result
 
-    def comments(self, source: Sequence[str], add_line: Callable[[str], None]) -> None:
-        for comment in source:
-            add_line(f"{self.hash}{comment}")
+    def apply(self, key: str, mark: str, line: str) -> str:
+        if '\n' in line:
+            raise ValueError("line must not contain newline char")
+        return f"{self}{key}{mark}{line}\n"
 
-    def parse(self, lines: 'LineStepper') -> Sequence[str]:
-        if lines.line is None or not lines.line.startswith(self.hash):
-            return ()
-        comments = list[str]()
-        while lines.line is not None and lines.line.startswith(self.hash):
-            comments.append(lines.line[len(self.hash):])
-            lines.step()
-        return comments
-
-
-class LineStepper:
-    iterator: Iterator[str] | None
-    line: str | None
-    number: int
-
-    def __init__(self, source: str):
-        self.iterator = iter(StringIO(source))
-        self.line = ''
-        self.number = 0
-        self.step()
-
-    def step(self) -> Self:
-        if self.iterator is not None:
-            line = self.line = next(self.iterator, None)
-            self.number += 1
-            if line is None:
-                self.iterator = None
-            elif line and line.endswith('\n'):
-                self.line = line[0:-1]
-        return self
+    def each(self, source: Iterable[str] | None, output: TextIO, mark: str) -> None:
+        if source:
+            for line in source:
+                output.write(self.apply('', mark, line))
 
 
 class Key(str):
-    comments_before: Sequence[str] = ()
+    comments_before: Iterable[str] | None = None
 
     def __init__(self, handled_by_str_new_but_here_for_linting: Any):
         if not self.isidentifier():
             raise ValueError(f"Keys must be identifiers: {self}")
 
+    def before(self, indent: Indent, output: TextIO) -> None:
+        if self.comments_before:
+            output.write('\n')
+            indent.each(self.comments_before, output, '#')
 
-class Element:
-    comments_after: Sequence[str] = ()
+    @staticmethod
+    def parse(indent: Indent, parser: 'Parser') -> Iterable[str] | None:
+        if parser.input.closed:
+            return None
+        if parser.end:
+            if not parser.begins(indent):
+                raise RuntimeError(f"{parser.number} expected Key")
+            return None
+        parser.step()
+        comments = parser.comments(indent)
+        if not parser.begins(indent):
+            raise RuntimeError(f"{parser.number} expected Key")
+        return comments
+
+
+class Element(ABC):
+    marker: ClassVar[str]
+    comments_after: Iterable[str] | None = None
 
     @staticmethod
     def of(any: Any) -> 'Element':
@@ -100,44 +86,33 @@ class Element:
                 return Dict((Key(k), Element.of(v)) for k, v in any.items())
         raise ValueError(f"no Element for {type(any)}")
 
-    @abstractmethod
-    def start_no_key(self, indent: Indent) -> str:
+    def abbrev(self) -> str | None:
+        return None
+
+    def finish(self, indent: Indent, output: TextIO) -> None:
+        """indent must be one more than it was for the marker line"""
         pass
 
-    @abstractmethod
-    def start(self, indent: Indent, key: Key) -> str:
-        pass
-
-    def finish(self, indent: Indent, add_line: Callable[[str], None]) -> None:
-        """indent should be one more than what was given to start"""
-        if self.comments_after:
-            indent.less().comments(self.comments_after, add_line)
-
-    @staticmethod
-    def parse(value: str, indent: Indent, lines: LineStepper) -> 'Element':
-        if value.startswith('\t'):
-            raise ValueError(f"{lines.number}: excess indentation")
-        match value:
-            case '>': return Text.parse(indent.more(), lines.step())
-            case '[]': return List().parse(indent.more(), lines.step())
-            case ':': return Dict().parse(indent.more(), lines.step())
-        lines.step()
-        return String.parse(value)
+    # @staticmethod
+    # def parse(value: str, indent: Indent, parser: 'Parser') -> 'Element':
+    #     match value:
+    #         case '>': elt = Text.parse(indent.more(), parser)
+    #         case '[]': elt = List().parse(indent.more(), parser)
+    #         case ':': elt = Dict().parse(indent.more(), parser)
+    #         case _: elt = String(value)
+    #     parser.step()
+    #     elt.comments_after = parser.comments(indent)
+    #     return elt
 
 
 class String(str, Element):
+    marker = '='
 
     def __init__(self, handled_by_str_new_but_here_for_linting: Any):
         if anyBreakChar.search(self):
-            raise ValueError("muse use Text because of break char")
+            raise ValueError("must use Text because of break char")
 
-    def start_no_key(self, indent: Indent) -> str:
-        return f"{indent}{self.quoted()}"
-
-    def start(self, indent: Indent, key: Key) -> str:
-        return f"{indent}{key}={self.quoted()}"
-
-    def quoted(self) -> str:
+    def abbrev(self) -> str:
         match self:
             case ">": return "'>'"
             case "[]": return "'[]'"
@@ -154,92 +129,78 @@ class String(str, Element):
 
 
 class Text(str, Element):
+    marker = '>'
 
-    def start_no_key(self, indent: Indent) -> str:
-        return f"{indent}>"
-
-    def start(self, indent: Indent, key: Key) -> str:
-        return f"{indent}{key}=>"
-
-    def finish(self, indent: Indent, add_line: Callable[[str], None]) -> None:
-        for it in self.split('\n'):
-            add_line(f"{indent}{it}")
-        super().finish(indent, add_line)  # self.comments_after
+    def finish(self, indent: Indent, output: TextIO) -> None:
+        indent.each(self.split('\n'), output, '')
 
     @staticmethod
-    def parse(indent: Indent, lines: LineStepper) -> 'Text':
-        buffer = StringIO()
-        while lines.line is not None and lines.line.startswith(indent):
-            if buffer.tell():
-                buffer.write('\n')
-            buffer.write(lines.line[len(indent):])
-            lines.step()
+    def parse(indent: Indent, parser: 'Parser') -> 'Text':
+        if not parser.begins(indent):
+            raise RuntimeError(f"{parser.number}: Text must have content")
+        buffer = StringIO(parser.extract(len(indent)))
+        parser.step()
+        while parser.begins(indent):
+            buffer.write('\n')
+            buffer.write(parser.extract(len(indent)))
+            parser.step()
         return Text(buffer.getvalue())
 
 
 class List(list[Element], Element):
-    comments_intro: Sequence[str] = ()
+    marker = '[]'
+    comments_intro: Iterable[str] | None = None
 
-    def start_no_key(self, indent: Indent) -> str:
-        return f"{indent}[]"
-
-    def start(self, indent: Indent, key: Key) -> str:
-        return f"{indent}{key}[]"
-
-    def finish(self, indent: Indent, add_line: Callable[[str], None]) -> None:
-        indent.comments(self.comments_intro, add_line)
+    def finish(self, indent: Indent, output: TextIO) -> None:
+        indent.each(self.comments_intro, output, '#')
         for value in self:
-            add_line(value.start_no_key(indent))
-            value.finish(indent.more(), add_line)
-        super().finish(indent, add_line)  # self.comments_after
+            abbrev = value.abbrev()
+            marker = value.marker if abbrev is None else ''
+            output.write(indent.apply('', marker, abbrev or ''))
+            value.finish(indent.more(), output)
+            indent.each(value.comments_after, output, '#')
 
-    def parse(self, indent: Indent, lines: LineStepper) -> 'List':
-        self.comments_intro = indent.parse(lines)
-        while lines.line is not None and lines.line.startswith(indent):
-            value = lines.line[len(indent):]
-            elt = Element.parse(value, indent, lines)
-            elt.comments_after = indent.parse(lines)
-            self.append(elt)
+    def parse(self, indent: Indent, parser: 'Parser') -> 'List':
+        self.comments_intro = parser.comments(indent)
+        while parser.begins(indent):
+            if parser.line.count(Text.marker,)
+            match parser.extract(len(indent)):
+
+                case '>': elt = Text.parse(indent.more(), parser)
+                case '[]': elt = List().parse(indent.more(), parser)
+                case ':': elt = Dict().parse(indent.more(), parser)
+                case _ as value: elt = String(value)
+            parser.step()
+            elt.comments_after = parser.comments(indent)
+            self.append(Element.parse(value, indent, parser))
+            parser.step()
         return self
 
 
 class Dict(dict[Key, Element], Element):
-    comments_intro: Sequence[str] = ()
+    marker = ':'
+    comments_intro: Iterable[str] | None = None
 
-    def start_no_key(self, indent: Indent) -> str:
-        return f"{indent}:"
-
-    def start(self, indent: Indent, key: Key) -> str:
-        return f"{indent}{key}:"
-
-    def finish(self, indent: Indent, add_line: Callable[[str], None]) -> None:
-        indent.comments(self.comments_intro, add_line)
-        above = self.comments_intro
+    def finish(self, indent: Indent, output: TextIO) -> None:
+        indent.each(self.comments_intro, output, '#')
         for key, value in self.items():
-            below = key.comments_before
-            if above or below:
-                add_line("")
-            indent.comments(key.comments_before, add_line)
-            add_line(value.start(indent, key))
-            value.finish(indent.more(), add_line)
-            above = value.comments_after
-        super().finish(indent, add_line)  # self.comments_after
+            key.before(indent, output)
+            abbrev = value.abbrev()
+            marker = value.marker
+            output.write(indent.apply(key, marker, abbrev or ''))
+            value.finish(indent.more(), output)
 
-    def parse(self, indent: Indent, lines: LineStepper) -> Self:
-        self.comments_intro = indent.parse(lines)
-        if lines.line == '':
-            lines.step()
-            key_comments = indent.parse(lines)
-        else:
-            key_comments = ()
-        while lines.line is not None and lines.line.startswith(indent):
+    def parse(self, indent: Indent, parser: 'Parser') -> Self:
+        self.comments_intro = parser.comments(indent)
+        while parser.end == 0 or parser.begins(indent):
+            key_comments = Key.parse(indent, parser)
             value = lines.line[len(indent):]
-            key, value = value.split('=',1)
+            key, value = value.split('=', 1)
             key = Key(key)
             key.comments_before = key_comments
             elt = Element.parse(value, indent, lines)
             elt.comments_after = indent.parse(lines)
-            self[key] =elt
+            self[key] = elt
             if lines.line == '':
                 lines.step()
                 key_comments = indent.parse(lines)
@@ -248,20 +209,60 @@ class Dict(dict[Key, Element], Element):
         return self
 
 
-class ALACS:
+class Parser:
+    input: TextIO
+    line: str
+    end: int
+    number: int
 
-    @staticmethod
-    def write(alacs: Dict, out: anyTextIO) -> anyTextIO:
-        def write_one_line(line: str) -> None:
-            assert '\n' not in line
-            out.write(line)
-            out.write('\n')
-        alacs.finish(Indent.of(0), write_one_line)
+    def __init__(self, source: str | Path):
+        self.input = (StringIO(source) if isinstance(source, str)
+                      else source.open(encoding="utf-8", newline='\n'))
+        self.line = ''
+        self.end = 0
+        self.number = 0
+        self.step()
+
+    def step(self) -> None:
+        if not self.input.closed:
+            self.line = self.input.readline()
+            self.number += 1
+            if not self.line:
+                self.input.close()
+                self.end = 0
+            else:
+                self.end = len(self.line)
+                self.end -= self.line.count('\n', self.end - 1)
+
+    def extract(self, start: int) -> str:
+        return self.line[start:self.end]
+
+    def begins(self, indent: Indent, mark: str = '') -> bool:
+        if not self.line.startswith(indent):
+            return False
+        start = len(indent) + len(mark)
+        if mark and not self.line.count(mark, len(indent), start):
+            return False
+        return True
+
+    def comments(self, indent: Indent) -> Iterable[str] | None:
+        if not self.begins(indent, '#'):
+            return None
+        result = [self.extract(len(indent)+1)]
+        while self.begins(indent, '#'):
+            result.append(self.extract(len(indent)+1))
+
+
+class ALACS:
+    _zero_indent = Indent('')
+
+    def write(self, alacs: Dict, out: anyTextIO) -> anyTextIO:
+        assert not alacs.comments_after
+        alacs.finish(self._zero_indent, out)
         return out
 
-    @staticmethod
-    def encode(alacs: Dict) -> str:
-        return ALACS.write(alacs, StringIO(newline='\n')).getvalue()
+    def encode(self, alacs: Dict) -> str:
+        return self.write(alacs, StringIO(newline='\n')).getvalue()
 
     def load(self, path: Path):
         with path.open(encoding='utf8', newline='\n') as stream:
