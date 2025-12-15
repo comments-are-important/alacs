@@ -1,8 +1,9 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import UserString
 from collections.abc import Mapping, Sequence
+from enum import StrEnum, auto
 from io import BytesIO, StringIO
-from typing import Any, TypeAlias
+from typing import Any, ClassVar, TypeAlias
 
 # multiple inheritance (from builtins in particular) means that __slots__ and __init__
 # must be written as below to avoid TypeError about instance lay-out conflict.
@@ -52,20 +53,30 @@ class Value(ABC):
     __slots__ = ()
 
 
+class Style(StrEnum):
+    LONG_EMPTY = auto()
+    SINGLE_LINE = auto()
+    MARKDOWN = auto()
+
+
 class Text(UTF8, Value):
-    long_empty: bool  # = False
+    style: Style | None  # = None
 
     def __init__(self, *lines: Encoded | String):
         super().__init__(*lines)
         self.starting_line = 0
         self.comment_after = None
-        self.long_empty = False
+        self.style = None
 
-    __slots__ = ('starting_line', 'comment_after', 'long_empty')
+    __slots__ = ('starting_line', 'comment_after', 'style')
 
 
 class Array(Value, ABC):
     comment_intro: Comment | None  # = None
+
+    @abstractmethod
+    def __len__(self) -> int:
+        pass
 
     __slots__ = ()
 
@@ -82,12 +93,14 @@ class List(list[Value], Array):
 
 
 class Key(str):
+    blank_line_before: bool  # = False
     comment_before: Comment | None  # = None
 
     def __init__(self, handled_by_str_new_but_here_for_type_hint: Any):
+        self.blank_line_before = False
         self.comment_before = None
 
-    __slots__ = ('comment_before',)
+    __slots__ = ('blank_line_before', 'comment_before')
 
 
 class Dict(dict[Key, Value], Array):
@@ -159,26 +172,54 @@ class Indent:
 
 
 class Memory:
+    empty: ClassVar[memoryview] = memoryview(b'')
 
     def __init__(self):
         super().__init__()
+        self._scratch = list[Encoded]()
         self._errors = list[str]()
         self._indent: Indent = Indent(b'')
         self._count: int = 0
-        self._utf8 = list[Encoded]()
         self._write = BytesIO()
-        self._parse = memoryview(b'')
-        self._next: int = 0
-        self._line = self._parse
-        self._tabs: int = 0
+        self._parse = Memory.empty
+        self._next: int = -1
+        self._line = Memory.empty
+        self._tabs: int = -1
 
-    __slots__ = ("_errors", "_indent", "_count", "_utf8",
+    __slots__ = ("_scratch", "_errors", "_indent", "_count",
                  "_write", "_parse", "_next", "_line", "_tabs")
 
-    def _zero(self, count: int = 0) -> None:
-        self._errors.clear()
-        self._indent = self._indent.zero()
-        self._count = count
+    # ============================================================================ UTF8
+
+    def normalize(self, utf8: UTF8) -> None:
+        if 1 == len(utf8) and 0 == len(utf8[0]):
+            utf8.clear()  # `[]` is more "True"ly empty than `[b'']`
+        else:
+            self._scratch.clear()
+            for index in range(len(utf8) - 1, -1, -1):
+                chunk = utf8[index]
+                if not isinstance(chunk, memoryview):
+                    if b'\n' not in chunk:
+                        continue
+                    chunk = memoryview(chunk)
+                start = len(chunk) - 1
+                while 0 <= start and 10 != chunk[start]:
+                    start -= 1
+                if 0 <= start:
+                    self._scratch.append(chunk[start+1:])
+                    limit = start
+                    start -= 1
+                    while start >= 0:
+                        if 10 == chunk[start]:
+                            self._scratch.append(chunk[start+1:limit])
+                            limit = start
+                        start -= 1
+                    self._scratch.append(chunk[:limit])
+                    self._scratch.reverse()
+                    utf8[index:index+1] = self._scratch
+                    self._scratch.clear()
+
+    # ========================================================================== errors
 
     def _error(self, message: str) -> str:
         match self._errors:
@@ -201,21 +242,26 @@ class Memory:
 
     # ======================================================================= to python
 
-    def python(self, value: Value) -> str | list | dict:
+    def python(self, any: Value) -> str | list | dict:
         """Convert a `Value` to simple Python data.
 
         Returns a deep copy with any `Text` replaced by `str` instances,
         and the arrays replaced by their builtin analogs.
         """
-        self._zero()
-        match self._python(value):
-            case _ if self._errors:
-                raise ValueError(self._error(
-                    "argument is or contains illegal non-`Value` data"))
-            case None:
-                raise AssertionError("impossible: got None, but no error")
-            case result:
-                return result
+        self._errors.clear()
+        self._indent = self._indent.zero()
+        try:
+            match self._python(any):
+                case _ if self._errors:
+                    raise ValueError(self._error(
+                        "argument is or contains illegal non-`Value` data"))
+                case None:
+                    raise AssertionError("impossible: got None, but no error")
+                case result:
+                    return result
+        finally:
+            self._errors.clear()
+            self._indent = self._indent.zero()
 
     def _python(self, any: Value) -> str | list | dict | None:
         match any:
@@ -236,7 +282,7 @@ class Memory:
                     self._indent._key = key
                     match key:
                         case Key():
-                            result[key] = self._python(value)
+                            result[str(key)] = self._python(value)
                         case other:
                             self._errors_add("key is", type(other))
                 self._indent = self._indent.less()
@@ -250,17 +296,23 @@ class Memory:
 
         Returns deep copy except bytes/bytearray/memoryview are shared
         (even though some of those are mutable)."""
-        self._zero()
-        match self._value(mapping):
-            case _ if self._errors:
-                raise ValueError(self._error(
-                    "argument contains data that can't be converted to `Value`"))
-            case None:
-                raise AssertionError("impossible: got None, but no error")
-            case File() as result:
-                return result
-            case other:
-                raise AssertionError(f"impossible: got {type(other)}")
+        self._errors.clear()
+        self._indent = self._indent.zero()
+        try:
+            match self._value(mapping):
+                case _ if self._errors:
+                    raise ValueError(self._error(
+                        "argument contains data that can't be converted to `Value`"))
+                case None:
+                    raise AssertionError("impossible: got None, but no error")
+                case File() as result:
+                    return result
+                case other:
+                    raise AssertionError(f"impossible: got {type(other)}")
+        finally:
+            self._scratch.clear()
+            self._errors.clear()
+            self._indent = self._indent.zero()
 
     def _value(self, any: Any) -> Value | None:
         match any:
@@ -295,54 +347,32 @@ class Memory:
                 return result
         self._errors_add("value is", type(any))
 
-    # ============================================================================ UTF8
-
-    def normalize(self, utf8: UTF8) -> None:
-        if 1 == len(utf8) and 0 == len(utf8[0]):
-            utf8.clear()  # `[]` is more "True"ly empty than `[b'']`
-        else:
-            for index in range(len(utf8) - 1, -1, -1):
-                chunk = utf8[index]
-                if not isinstance(chunk, memoryview):
-                    if b'\n' not in chunk:
-                        continue
-                    chunk = memoryview(chunk)
-                start = len(chunk) - 1
-                while 0 <= start and 10 != chunk[start]:
-                    start -= 1
-                if 0 <= start:
-                    scratch = self._utf8
-                    scratch.clear()
-                    scratch.append(chunk[start+1:])
-                    limit = start
-                    start -= 1
-                    while start >= 0:
-                        if 10 == chunk[start]:
-                            scratch.append(chunk[start+1:limit])
-                            limit = start
-                        start -= 1
-                    scratch.append(chunk[:limit])
-                    scratch.reverse()
-                    utf8[index:index+1] = scratch
-                    scratch.clear()
-
     # ========================================================================== encode
 
     def encode(self, file: File) -> memoryview:
         """result must be `release`d - suggest use `with`."""
-        self._zero(1)
-        self._write.seek(0)
-        self._write.truncate()
-        self._writeComment(file.hashbang)
-        self._writeDict(file)
-        self._writeComment(file.comment_after)
-        if self._errors:
-            raise ValueError(self._error(
-                "argument is or contains illegal non-`Value` data"))
-        return self._write.getbuffer()
+        self._errors.clear()
+        self._indent = self._indent.zero()
+        try:
+            self._count = 1
+            self._write.seek(0)
+            self._write.truncate()
+            self._writeComment(file.hashbang)
+            self._writeDict(file)
+            self._writeComment(file.comment_after)
+            if self._errors:
+                raise ValueError(self._error(
+                    "argument is or contains illegal non-`Value` data"))
+            return self._write.getbuffer()
+        finally:
+            self._scratch.clear()
+            self._errors.clear()
+            self._indent = self._indent.zero()
 
     def _writeln(self, key: Key | None, marker: bytes, data: Encoded) -> None:
         out = self._write
+        if 1 != self._count:
+            out.write(b'\n')
         out.write(self._indent._bytes)
         if key:
             out.write(key.encode())  # trusted because ctor
@@ -352,7 +382,6 @@ class Memory:
             if 10 in data:
                 raise AssertionError("impossible: normalized has LF")
             out.write(data)
-        out.write(b'\n')
         self._count += 1
 
     def _writeComment(self, comment: Comment | None) -> None:
@@ -371,12 +400,13 @@ class Memory:
                         self._writeln(None, b'\t', line)
 
     def _writeText(self, text: Text) -> None:
-        self.normalize(text)
-        if text.long_empty and not text:
-            self._writeln(None, b'', b'')
-        elif text:
+        if text:
+            if text.style == Style.LONG_EMPTY:
+                self._errors_add("Text is not LONG_EMPTY")
             for line in text:
                 self._writeln(None, b'', line)
+        elif text.style == Style.LONG_EMPTY:
+            self._writeln(None, b'', b'')
 
     def _writeList(self, array: List) -> None:
         self._writeComment(array.comment_intro)
@@ -390,6 +420,8 @@ class Memory:
             self._indent._key = key
             match key:
                 case Key():
+                    if key.blank_line_before:
+                        self._writeln(None, b'', b'')
                     self._writeComment(key.comment_before)
                     self._writeValue(key, value)
                 case other:
@@ -399,10 +431,21 @@ class Memory:
         value.starting_line = self._count
         match value:
             case Text():
-                self._writeln(key, b'>', b'')
-                self._indent = self._indent.more()
-                self._writeText(value)
-                self._indent = self._indent.less()
+                self.normalize(value)
+                style = value.style
+                if style == Style.SINGLE_LINE and len(value) > 1:
+                    self._errors_add("Text is not SINGLE_LINE")
+                    style = None
+                if style == Style.SINGLE_LINE:
+                    marker = b'' if key is None else b'='
+                    text = b'' if not value else value[0]
+                    self._writeln(key, marker, text)
+                else:
+                    marker = b'>' if value.style == Style.MARKDOWN else b'|'
+                    self._writeln(key, marker, b'')
+                    self._indent = self._indent.more()
+                    self._writeText(value)
+                    self._indent = self._indent.less()
             case List():
                 self._writeln(key, b'[]', b'')
                 self._indent = self._indent.more()
@@ -420,129 +463,206 @@ class Memory:
     # ========================================================================== decode
 
     def decode(self, alacs: bytes) -> File:
-        file = File()
-        self._zero()
-        self._parse = memoryview(alacs)
-        self._next = 0
-        self._readln()
-        file.hashbang = self._readComment()
-        self._readDict(file)
-        file.comment_after = self._readComment()
-        if self._errors:
-            raise ValueError(self._error(
-                "parse errors"))
-        return file
+        self._errors.clear()
+        self._indent = self._indent.zero()
+        try:
+            self._count = 0
+            self._parse = memoryview(alacs)
+            self._next = 0
+            file = File()
+            self._readln()
+            if len(self._line) > 1 and self._line[0] == 35 and self._line[1] == 33:
+                file.hashbang = self._readComment()
+            self._readDictEntries(file)
+            if len(self._line) > 1 and self._line[0] == 35:
+                file.comment_after = self._readComment()
+            if self._errors:
+                raise ValueError(self._error("parse errors"))
+            return file
+        finally:
+            self._scratch.clear()
+            self._errors.clear()
+            self._indent = self._indent.zero()
+            self._parse = self._line = Memory.empty
 
-    def _readln(self, limit: bool = True) -> bool:
-        excess = 0
-        while True:
-            if self._next < 0:
-                if self._line:
-                    self._line = self._parse[len(self._parse):]
-                    self._tabs = 0
-                if excess:
-                    self._errors_add(f"excessive indent from line {excess}")
-                return False
-            # no memoryview.index (yet), so assume that _parse wraps a bytes...
-            index = self._parse.obj.find(10, self._next)  # type: ignore
-            if index <= 0:
-                self._line = self._parse[self._next:]
-                self._next = -1
-            else:
-                self._line = self._parse[self._next:index]
-                index += 1
-                self._next = index if index < len(self._parse) else -1
-            index = 0
-            while index < len(self._line) and self._line[index] == 9:
-                index += 1
-            self._tabs = index
-            self._count += 1
-            if not limit or index <= len(self._indent):
-                if excess:
-                    self._errors_add(f"excessive indent from line {excess}")
-                return True
-            if not excess:
-                excess = self._count
+    def _readln(self) -> bool:
+        if self._next < 0:
+            self._line = Memory.empty
+            self._tabs = -1
+            return False
+        # no memoryview.index (yet), so assume that _parse wraps a bytes...
+        index = self._parse.obj.find(10, self._next)  # type: ignore
+        if index < 0:
+            self._line = self._parse[self._next:]
+            self._next = -1
+        else:
+            self._line = self._parse[self._next:index]
+            index += 1
+            self._next = index if index < len(self._parse) else -1
+        index = 0
+        while index < len(self._line) and self._line[index] == 9:
+            index += 1
+        self._tabs = index
+        self._count += 1
+        return True
+
+    class _Marker(StrEnum):
+        PLAINTEXT = "|"
+        MARKDOWN = ">"
+        LIST = "[]"
+        DICT = ":"
+        COMMENT = "#"
+
+    def _marker(self) -> _Marker | None:
+        over = len(self._line) - len(self._indent)
+        if over <= 0:
+            return None
+        match self._line[-1]:
+            case 124: return Memory._Marker.PLAINTEXT
+            case 62: return Memory._Marker.MARKDOWN
+            case 93 if over > 1 and self._line[-2] == 91:
+                return Memory._Marker.LIST
+            case 58: return Memory._Marker.DICT
+        if self._line[len(self._indent)] == 35:
+            return Memory._Marker.COMMENT
+        return None
 
     def _readKey(self, drop: int) -> Key | None:
-        if len(self._line) == self._tabs + drop:
+        if len(self._line) < len(self._indent) + drop:
             return None
         else:
-            return Key(self._line[self._tabs:-drop].tobytes().decode())
+            return Key(self._line[len(self._indent):-drop].tobytes().decode())
 
-    def _readComment(self) -> Comment | None:
-        if self._tabs != len(self._indent) or len(self._line) <= self._tabs or 35 != self._line[self._tabs]:
-            return None
+    def _readComment(self) -> Comment:
+        assert self._marker() == Memory._Marker.COMMENT, f"comment != {self._marker()}"
         comment = Comment()
         comment.starting_line = self._count
-        comment.append(self._line[self._tabs+1:])
-        while self._readln(False) and self._tabs > len(self._indent):
-            comment.append(self._line[self._tabs+1:])
+        comment.append(self._line[len(self._indent)+1:])
+        while self._readln() and self._tabs > len(self._indent):
+            comment.append(self._line[len(self._indent)+1:])
         return comment
 
-    def _readText(self, text: Text) -> None:
-        while self._tabs >= len(self._indent):
-            text.append(self._line[self._tabs:])
-            if not self._readln(False):
-                break
+    def _readText(self, markdown: bool) -> Text:
+        marker = Memory._Marker.MARKDOWN if markdown else Memory._Marker.PLAINTEXT
+        assert self._marker() == marker, f"text != {self._marker()}"
+        text = Text()
+        text.starting_line = self._count
+        if markdown:
+            text.style = Style.MARKDOWN
+        while self._readln() and self._tabs > len(self._indent):
+            text.append(self._line[len(self._indent)+1:])
         if len(text) == 1 and len(text[0]) == 0:
             text.clear()
-            text.long_empty = True
+            text.style = Style.LONG_EMPTY
+        if self._marker() == Memory._Marker.COMMENT:
+            text.comment_after = self._readComment()
+        return text
 
-    def _readList(self, array: List) -> None:
-        if self._next >= 0 and self._tabs == len(self._indent):
+    def _readList(self) -> List:
+        assert self._marker() == Memory._Marker.LIST, f"list != {self._marker()}"
+        array = List()
+        array.starting_line = self._count
+        if not self._readln():
+            return array
+        self._indent = self._indent.more()
+        if self._marker() == Memory._Marker.COMMENT:
             array.comment_intro = self._readComment()
-            while self._next >= 0 and self._tabs == len(self._indent):
-                key, value = self._readValue(len(array))
-                if key is not None:
-                    self._errors_add(f"key not allowed in List: {key}")
-                else:
-                    array.append(value)
+        self._readListItems(array)
+        self._indent = self._indent.less()
+        if self._marker() == Memory._Marker.COMMENT:
+            array.comment_after = self._readComment()
+        return array
 
-    def _readDict(self, array: Dict) -> None:
-        if self._next >= 0 and self._tabs == len(self._indent):
+    def _readListItems(self, array: List) -> None:
+        while self._tabs >= len(self._indent):
+            match self._marker():
+                case Memory._Marker.PLAINTEXT:
+                    array.append(self._readText(False))
+                case Memory._Marker.MARKDOWN:
+                    array.append(self._readText(True))
+                case Memory._Marker.LIST:
+                    array.append(self._readList())
+                case Memory._Marker.DICT:
+                    array.append(self._readDict())
+                case Memory._Marker.COMMENT:
+                    self._errors_add("misplaced comment")
+                case None:
+                    text = Text(self._line[len(self._indent):])
+                    text.style = Style.SINGLE_LINE
+                    array.append(text)
+
+    def _readDict(self) -> Dict:
+        assert self._marker() == Memory._Marker.DICT, f"dict != {self._marker()}"
+        array = Dict()
+        array.starting_line = self._count
+        if not self._readln():
+            return array
+        self._indent = self._indent.more()
+        if self._marker() == Memory._Marker.COMMENT:
             array.comment_intro = self._readComment()
-            while self._next >= 0 and self._tabs == len(self._indent):
-                before = self._readComment()
-                key, value = self._readValue(-1)
-                if key is None:
-                    self._errors_add("key required in Dict")
-                else:
-                    key.comment_before = before
-                    array[key] = value
+        self._readDictEntries(array)
+        self._indent = self._indent.less()
+        if self._marker() == Memory._Marker.COMMENT:
+            array.comment_after = self._readComment()
+        return array
 
-    def _readValue(self, index: int) -> tuple[Key | None, Value]:
-        key: str | None = None
-        value: Value | None = None
-        start = self._count
-        match self._line[-1]:
-            case 62:
-                key = self._readKey(1)
-                self._indent._key = key or index
-                self._indent = self._indent.more()
-                self._readln()
-                value = Text()
-                self._readText(value)
-                self._indent = self._indent.less()
-            case 93 if len(self._line) > 1 and self._line[-2] == 91:
-                key = self._readKey(2)
-                self._indent._key = key or index
-                self._indent = self._indent.more()
-                self._readln()
-                value = List()
-                self._readList(value)
-                self._indent = self._indent.less()
-            case 58:
-                key = self._readKey(1)
-                self._indent._key = key or index
-                self._indent = self._indent.more()
-                self._readln()
-                value = Dict()
-                self._readDict(value)
-                self._indent = self._indent.less()
-        if value is None:
-            self._errors_add("unrecognized line")
-            return (key, Text())  # error means value is irrelevant
-        value.comment_after = self._readComment()
-        value.starting_line = start
-        return (key, value)
+    def _readDictEntries(self, array: Dict) -> None:
+        duplicates = set[Key]()
+        blank = False
+        comment:Comment|None = None
+        first = len(self._indent)
+        while self._tabs >= first:
+            match self._marker():
+                case Memory._Marker.PLAINTEXT:
+                    key = Key(self._line[first:-1].tobytes().decode())
+                    value = self._readText(False)
+                case Memory._Marker.MARKDOWN:
+                    key = Key(self._line[first:-1].tobytes().decode())
+                    value = self._readText(True)
+                case Memory._Marker.LIST:
+                    key = Key(self._line[first:-2].tobytes().decode())
+                    value = self._readList()
+                case Memory._Marker.DICT:
+                    key = Key(self._line[first:-1].tobytes().decode())
+                    value = self._readDict()
+                case Memory._Marker.COMMENT:
+                    if comment:
+                        self._errors_add("misplaced comment")
+                    comment = self._readComment()
+                    continue
+                case None if len(self._line) == first:
+                    if blank:
+                        self._errors_add("multiple blank lines")
+                    if comment:
+                        self._errors_add("blank line must precede comment")
+                    blank = True
+                    self._readln()
+                    continue
+                case None: # and guard for previous case failed
+                    index = first
+                    assert len(self._line) > index, "blank in wrong case"
+                    # no memoryview.index (yet)...
+                    while self._line[index] != 61:
+                        index += 1
+                        if index >= len(self._line):
+                            self._errors_add("expected `=`")
+                            index = -1
+                            break
+                    self._readln()
+                    if index < 0:
+                        continue
+                    key = Key(self._line[first:index].tobytes().decode())
+                    value = Text(self._line[index+1:])
+                case _:
+                    raise RuntimeError("match cases are not exhaustive?")
+            if key in array:
+                duplicates.add(key)
+            if blank:
+                key.blank_line_before = True
+                blank = False
+            if comment:
+                key.comment_before = comment
+                comment = None
+            array[key] = value
+        if duplicates:
+            self._errors_add(f"duplicate keys: {duplicates}")

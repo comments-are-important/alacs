@@ -1,0 +1,24 @@
+{
+    "name": "alacs",
+    "workspaceFolder": "/workspaces/alacs",
+    "dockerComposeFile": "docker-compose.yaml",
+    "service": "code",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "editorconfig.editorconfig",
+                "ms-python.python",
+                "ms-vscode.makefile-tools",
+                "redhat.vscode-yaml",
+                "streetsidesoftware.code-spell-checker",
+                "tamasfe.even-better-toml"
+            ],
+            "settings": {
+                "yaml.schemas": {
+                    "/opt/workdir/linkml-meta.schema.json": "**/*.linkml.yaml",
+                    "./linkml-tutorial/personinfo.schema.json": "**/*.personinfo.yaml"
+                }
+            }
+        }
+    }
+}

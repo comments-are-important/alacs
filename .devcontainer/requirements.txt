@@ -1,0 +1,9 @@
+--only-binary :all:
+beautifulsoup4
+html5lib
+pydantic
+requests
+rdflib
+tomlkit
+PyYAML
+ruamel_yaml

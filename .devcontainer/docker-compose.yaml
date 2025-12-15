@@ -1,0 +1,11 @@
+
+name: alacs
+
+services:
+
+  code:
+    build:
+      target: code
+    init: true
+    volumes:
+      - ..:/workspaces/alacs
