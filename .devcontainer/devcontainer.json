@@ -6,6 +6,7 @@
     "customizations": {
         "vscode": {
             "extensions": [
+                "charliermarsh.ruff",
                 "editorconfig.editorconfig",
                 "ms-python.python",
                 "ms-vscode.makefile-tools",
@@ -14,6 +15,9 @@
                 "tamasfe.even-better-toml"
             ],
             "settings": {
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                },
                 "yaml.schemas": {
                     "/opt/workdir/linkml-meta.schema.json": "**/*.linkml.yaml",
                     "./linkml-tutorial/personinfo.schema.json": "**/*.personinfo.yaml"
