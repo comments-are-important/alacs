@@ -37,8 +37,14 @@ class UTF8(list[Encoded]):
                 case str() | UserString():
                     self[index] = line.encode()
 
-    def join(self, prefix: bytes) -> str:
-        return b"\n".join(prefix + it for it in self).decode()
+    def __bytes__(self) -> bytes:
+        return b'\n'.join(self)
+
+    def __str__(self) -> str:
+        return bytes(self).decode()
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}={str(self)}>"
 
     def normalize(self, scratch: list[Encoded] | None) -> None:
         if 1 == len(self) and 0 == len(self[0]):
@@ -46,7 +52,8 @@ class UTF8(list[Encoded]):
         else:
             if scratch is None:
                 scratch = list[Encoded]()
-            scratch.clear()
+            else:
+                scratch.clear()
             for index in range(len(self) - 1, -1, -1):
                 chunk = self[index]
                 if not isinstance(chunk, memoryview):
@@ -279,7 +286,7 @@ class Memory:
     def _python(self, any: Value) -> str | list | dict | None:
         match any:
             case Text():
-                return any.join(b'')
+                return str(any)
             case List():
                 result = list()
                 self._indent = self._indent.more()
@@ -301,6 +308,7 @@ class Memory:
                 self._indent = self._indent.less()
                 return result
         self._errors_add("value is", type(any))
+        return None
 
     # --------------------------------------------------------------------- from python
 
@@ -362,6 +370,7 @@ class Memory:
                 self._indent = self._indent.less()
                 return result
         self._errors_add("value is", type(any))
+        return None
 
     # -------------------------------------------------------------------------- encode
 
