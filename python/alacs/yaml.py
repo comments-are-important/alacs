@@ -1,5 +1,5 @@
 from io import BytesIO
-from . import File, Dict, List, Text, Comment, Value, Encoded
+from . import File, Dict, List, Text, Comment, Value, Key, Encoded
 
 __all__ = ["YAML"]
 
@@ -9,7 +9,12 @@ class YAML(BytesIO):
 
     This class prioritizes simple code that preserves all the input. No attempt is made
     to make the output look nice. A load+dump cycle using `ruamel.yaml` round-trip will
-    clean things up a bit without losing the comments."""
+    clean things up a bit without losing the comments.
+
+    Note that the order of comments in the YAML is differs to accommodate ruamel.yaml
+    round trip losing comments in various places:
+     - (between key and value)[https://sourceforge.net/p/ruamel-yaml/tickets/418/#4a67]
+     - (at end of file)[https://sourceforge.net/p/ruamel-yaml/tickets/451/]"""
 
     def __init__(self):
         self._scratch = list[Encoded]()
@@ -18,9 +23,11 @@ class YAML(BytesIO):
     def encode(self, alacs: File) -> BytesIO:
         self.seek(0)
         self.truncate()
+        self.write(b'--- !map\n')
         self._comment(b"", b"!", alacs.hashbang)
-        self._dict(b"", alacs)
-        self.seek(0)
+        self._comment(b"", b"i:", alacs.comment_intro)
+        self._dict(b"", False, alacs)
+        self.write(b'...\n')
         return self
 
     def _utf8(self, indent: bytes, prefix: bytes, alacs: list[Encoded]) -> None:
@@ -32,60 +39,74 @@ class YAML(BytesIO):
 
     def _comment(self, indent: bytes, prefix: bytes, alacs: Comment | None) -> None:
         if alacs is not None:
+            marked = b"#" if prefix == b"!" else b"#%d" % len(indent)
             alacs.normalize(self._scratch)
-            mark = b"#" if prefix == b'!' else b"#%d" % len(indent)
-            self._utf8(mark, prefix, alacs)
+            self._utf8(marked, prefix, alacs)
 
-    def _value(self, indent: bytes, alacs: Value) -> None:
+    def _value(self, indent: bytes, key: Key | bool, alacs: Value) -> None:
         match alacs:
             case Text():
-                self._text(indent, alacs)
+                self._comment(indent, b"a:", alacs.comment_after)
+                self._text(indent, key, alacs)
             case List():
-                self._list(indent, alacs)
+                self._comment(indent, b"i:", alacs.comment_intro)
+                self._comment(indent, b"a:", alacs.comment_after)
+                self._list(indent, key, alacs)
             case Dict():
-                self._dict(indent, alacs)
+                self._comment(indent, b"i:", alacs.comment_intro)
+                self._comment(indent, b"a:", alacs.comment_after)
+                self._dict(indent, key, alacs)
             case _:
                 raise ValueError(f"unexpected type: {type(alacs)}")
-        self._comment(indent, b"a:", alacs.comment_after)
 
-    def _text(self, indent: bytes, value: Text) -> None:
+    def _text(self, indent: bytes, key: Key | bool, value: Text) -> None:
         value.normalize(self._scratch)
         if value and not value[-1]:
-            self.write(b" |2+\n")
-            self._utf8(indent, b" ", value[:-1])
+            self._key(indent, key, b"|2+")
+            self._utf8(indent, b"  ", value[:-1])
         else:
-            self.write(b" |2-\n")
-            self._utf8(indent, b" ", value)
+            self._key(indent, key, b"|2-")
+            self._utf8(indent, b"  ", value)
 
-    def _list(self, indent: bytes, alacs: List) -> None:
+    def _list(self, indent: bytes, key: Key | bool, alacs: list[Value]) -> None:
         if not alacs:
-            self.write(indent)
-            self.write(b" []")
-        self.write(b"\n")
-        self._comment(indent, b"i:", alacs.comment_intro)
-        if alacs:
+            self._key(indent, key, b"[]")
+        else:
+            self._key(indent, key, b"")
             more = indent + b" "
             for value in alacs:
-                self.write(indent)
-                self.write(b"-")
-                self._value(more, value)
+                self._value(more, True, value)
 
-    def _dict(self, indent: bytes, alacs: Dict | File) -> None:
+    def _dict(self, indent: bytes, key: Key | bool, alacs: dict[Key, Value]) -> None:
         if not alacs:
-            self.write(indent)
-            self.write(b" {}\n")
-        elif not isinstance(alacs, File):
-            self.write(b"\n")
-        self._comment(indent, b"i:", alacs.comment_intro)
-        if alacs:
+            self._key(indent, key, b"{}")
+        else:
+            self._key(indent, key, b"")
             more = indent + b" "
             for key, value in alacs.items():
                 if key.blank_line_before:
-                    self._comment(indent, b"b", self._blank)
-                self._comment(indent, b"k:", key.comment_before)
-                self.write(indent)
+                    self._comment(more, b"b", self._blank)
+                self._comment(more, b"k:", key.comment_before)
+                self._value(more, key, value)
+
+    def _key(self, indent: bytes, key: Key | bool, end: bytes) -> None:
+        self.write(indent)
+        match key:
+            case False:
+                self.write(end)
+            case True:
+                self.write(b"-")
+                if end:
+                    self.write(b" ")
+                    self.write(end)
+            case Key():
+                value = key.replace("\\", r"\\").replace('"', r"\"").replace("\t", r"\t")
                 self.write(b'"')
-                key = key.replace("\\", r"\\").replace('"', r"\"").replace("\t", r"\t")
-                self.write(key.encode())
+                self.write(value.encode())
                 self.write(b'":')
-                self._value(more, value)
+                if end:
+                    self.write(b" ")
+                    self.write(end)
+            case _:
+                raise ValueError(f"unexpected type: {type(key)}")
+        self.write(b"\n")

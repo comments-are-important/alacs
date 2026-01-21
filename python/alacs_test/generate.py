@@ -31,6 +31,8 @@ class Random:
                 self.indent._key = key
                 array.append(self._value(depth))
             self.indent = self.indent.less()
+        if not array:
+            array.append(Text(b"value"))
         if choice(bools):
             array.comment_after = self._comment("after")
         if choice(bools):
@@ -49,6 +51,8 @@ class Random:
                     key.comment_before = self._comment("before")
                 array[key] = self._value(depth)
             self.indent = self.indent.less()
+        if not array:
+            array[Key("key")] = Text(b"value")
         if choice(bools):
             array.comment_intro = self._comment("intro")
 

@@ -65,7 +65,9 @@ def extract_ruamel_comments(file: CommentedMap) -> Translated:
     lines = list[str]()
     for comment in comments:
         for line in comment.value.splitlines():
-            lines.append(line.lstrip())
+            line = line.lstrip()
+            if line:
+                lines.append(line)
     return Translated(data, lines)
 
 
@@ -82,4 +84,6 @@ def diff_ruamel(was: CommentedMap, now: CommentedMap) -> bool:
 
 
 def diff_translate(was: FileSeparated, now: CommentedMap) -> bool:
-    return diff_any(Translated(was.python, was.comments), extract_ruamel_comments(now))
+    extracted = extract_ruamel_comments(now)
+    return diff_any(Translated(was.python, was.comments), extracted)
+    #return diff_any(was.python, extracted.data)
