@@ -20,6 +20,11 @@ to switch... but out of the box this still was not what I was looking for. Even 
 the API for working with comments seemed better, it was hard to write code that made
 complex updates.
 
+I also discovered that linear arrays in TOML can be extremely awkward: no better than
+JSON except for (arrays-of-tables)[https://toml.io/en/v1.1.0#array-of-tables]. TOML is
+not a good choice for representing the full range of data supported by JSON and YAML.
+There will be some ALACS code that is about YAML, but none about TOML.
+
 At this point I took a step back to consider why none of these popular libraries was
 making me happy. Eventually I concluded that the library APIs are hamstrung because the
 specs all say to ignore the comments. To human readers, comments have subjects: they
@@ -38,6 +43,6 @@ excluding comments from JSON make it unfriendly to humans. But if you acknowledg
 importance of comments, then why not make them full-fledged first-class citizens?
 
 So the goal that launched this project is to make it easy to write code that modifies
-files containing data that is shaped like YAML and TOML. And in the process of building
+files containing data that is shaped like YAML and JSON. And in the process of building
 this API there are some deeper questions that can be explored about finding ways for
 syntaxes like this to be even more friendly to humans.

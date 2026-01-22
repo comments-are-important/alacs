@@ -7,6 +7,5 @@ pydantic
 requests
 rdflib
 snakeviz
-tomlkit
 PyYAML
 ruamel_yaml
