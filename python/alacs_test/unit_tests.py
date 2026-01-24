@@ -1,9 +1,8 @@
 import re
 from collections import UserString
-from typing import ClassVar
 from unittest import TestCase, main
 import alacs_test
-from alacs import Memory, UTF8, Comment, Text, Key, Indent, File
+from alacs import Memory, UTF8, Comment, Text, Key, Indent, File, List
 
 # focus is on filling in gaps left  by the timing script in alacs_test.__main__
 # goal is to test all error branches to get 100% coverage of alacs.__init__
@@ -61,20 +60,12 @@ class TestErrors(TestCase):
         message = "one two five"
         self.assertIs(Memory()._error(message), message)
 
-    def test_premature(self):
-        memory = Memory()
-        # hypothetical: first error happens before the first line is counted
-        memory._errors_add("zero", memory._count)
-        memory._count += 1
-        memory._indent._key = "k"
-        memory._errors_add("one", memory._count)
-        self.assertEqual(memory._error("m"), "m:\n\t#0: zero 0\n\t#1: @k: one 1")
-
 
 class TestPython(TestCase):
     def test_impossible_none_no_error(self):
         class Impossible(Memory):
             def _python(self, any):
+                # actual code never returns None without also adding an error
                 return None
 
         literal = "impossible: got None, but no error"
@@ -84,24 +75,25 @@ class TestPython(TestCase):
     def test_impossible_type(self):
         class Impossible(Memory):
             def _python(self, any):
-                return "string"
+                # actual code always returns dict for a File
+                return ...
 
-        literal = "impossible: got <class 'str'>"
+        literal = "impossible: got <class 'ellipsis'>"
         pattern = re.compile(f"\\A{re.escape(literal)}\\z")
         self.assertRaisesRegex(AssertionError, pattern, Impossible().python, File())
 
-    def illegal(self, message:str) ->str:
+    def illegal(self, message: str) -> str:
         return "illegal non-`Value` data:\n\t" + message
 
     def test_illegal_key(self):
-        literal = self.illegal("#0: @[Ellipsis]: key is <class 'ellipsis'>")
+        literal = self.illegal("@[Ellipsis]: key is <class 'ellipsis'>")
         pattern = re.compile(f"\\A{re.escape(literal)}\\z")
         file = File()
         file[...] = ...  # type: ignore
         self.assertRaisesRegex(ValueError, pattern, Memory().python, file)
 
     def test_illegal_value(self):
-        literal = self.illegal("#0: @.x: value is <class 'ellipsis'>")
+        literal = self.illegal("@.x: value is <class 'ellipsis'>")
         pattern = re.compile(f"\\A{re.escape(literal)}\\z")
         file = File(x=...)  # type: ignore
         self.assertRaisesRegex(ValueError, pattern, Memory().python, file)
@@ -111,6 +103,7 @@ class TestFile(TestCase):
     def test_impossible_none_no_error(self):
         class Impossible(Memory):
             def _value(self, any):
+                # actual code never returns None without also adding an error
                 return None
 
         literal = "impossible: got None, but no error"
@@ -120,31 +113,63 @@ class TestFile(TestCase):
     def test_impossible_type(self):
         class Impossible(Memory):
             def _value(self, any):
-                return "string"
+                # actual code always returns File for a Mapping
+                return ...
 
-        literal = "impossible: got <class 'str'>"
+        literal = "impossible: got <class 'ellipsis'>"
         pattern = re.compile(f"\\A{re.escape(literal)}\\z")
         self.assertRaisesRegex(AssertionError, pattern, Impossible().file, {})
 
     def test_none_is_empty_text(self):
         self.assertEqual(File(k=Text()), Memory().file({"k": None}))
 
-    def illegal(self, message:str) ->str:
+    def illegal(self, message: str) -> str:
         return "can't be converted to `Value`:\n\t" + message
+
     def test_illegal_key(self):
-        literal = self.illegal("#0: @[Ellipsis]: key is <class 'ellipsis'>")
+        literal = self.illegal("@[Ellipsis]: key is <class 'ellipsis'>")
         pattern = re.compile(f"\\A{re.escape(literal)}\\z")
         self.assertRaisesRegex(ValueError, pattern, Memory().file, {...: None})
 
     def test_illegal_value(self):
-        literal = self.illegal("#0: @.k: value is <class 'ellipsis'>")
+        literal = self.illegal("@.k: value is <class 'ellipsis'>")
         pattern = re.compile(f"\\A{re.escape(literal)}\\z")
         self.assertRaisesRegex(ValueError, pattern, Memory().file, {"k": ...})
 
-    def test_illegal_item_in_list(self):
-        literal = self.illegal("#0: @.k[0]: value is <class 'ellipsis'>")
+    def test_illegal_list_item(self):
+        literal = self.illegal("@.k[0]: value is <class 'ellipsis'>")
         pattern = re.compile(f"\\A{re.escape(literal)}\\z")
         self.assertRaisesRegex(ValueError, pattern, Memory().file, {"k": [...]})
+
+class TestEncode(TestCase):
+    def test_denormalized(self):
+        text = Text("")
+        text.comment_after = Comment()
+        text.comment_after.append(b"") # now it is not normalized
+        with Memory().encode(File(k=text)) as buffer:
+            alacs = buffer.tobytes().decode()
+            self.assertEqual(alacs,"k=\n#")
+    def illegal(self, message: str) -> str:
+        return "illegal non-`Value` data:\n\t" + message
+
+    def test_illegal_key(self):
+        literal = self.illegal("@Ellipsis: key is <class 'ellipsis'>")
+        pattern = re.compile(f"\\A{re.escape(literal)}\\z")
+        alacs = File()
+        alacs[...]=... # type: ignore
+        self.assertRaisesRegex(ValueError, pattern, Memory().encode, alacs)
+
+    def test_illegal_value(self):
+        literal = self.illegal("#1: @k: value is <class 'ellipsis'>")
+        pattern = re.compile(f"\\A{re.escape(literal)}\\z")
+        alacs = File(k=...) # type: ignore
+        self.assertRaisesRegex(ValueError, pattern, Memory().encode, alacs)
+
+    def test_illegal_list_item(self):
+        literal = self.illegal("#2: @k[0]: value is <class 'ellipsis'>")
+        pattern = re.compile(f"\\A{re.escape(literal)}\\z")
+        alacs = File(k=List(...)) # type: ignore
+        self.assertRaisesRegex(ValueError, pattern, Memory().encode, alacs)
 
 
 class TestDecodeErrors(TestCase):

@@ -243,12 +243,15 @@ class Memory:
 
     def _errors_add(self, *parts: Any) -> None:
         message = StringIO()
-        message.write(f"#{self._count}:")
+        if self._count:
+            message.write(f"#{self._count}: ")
         keys = self._indent.keys()
         if keys:
-            message.write(f" @{keys}:")
+            message.write(f"@{keys}: ")
         for part in parts:
-            message.write(f" {part}")
+            message.write(f"{part} ")
+        message.seek(message.tell() - 1)
+        message.truncate() # zap the space at the end
         self._errors.append(message.getvalue())
 
     # ----------------------------------------------------------------------- to python
@@ -420,7 +423,7 @@ class Memory:
         for index, value in enumerate(array):
             self._indent._key = index
             self._writeIndent()
-            value.starting_line = self._count
+            starting_line = self._count
             match value:
                 case Text():
                     if not self._shortList(value):
@@ -444,6 +447,8 @@ class Memory:
                     self._indent = self._indent.less()
                 case _:
                     self._errors_add("value is", type(value))
+                    continue
+            value.starting_line = starting_line
             self._writeComment(b"#", value.comment_after)
 
     def _shortDict(self, key: Key, text: Text) -> bool:
@@ -470,7 +475,7 @@ class Memory:
                 self._writeIndent()
             self._writeComment(b"//", key.comment_before)
             self._writeIndent()
-            value.starting_line = self._count
+            starting_line = self._count
             match value:
                 case Text():
                     if not self._shortDict(key, value):
@@ -503,6 +508,8 @@ class Memory:
                     self._indent = self._indent.less()
                 case _:
                     self._errors_add("value is", type(value))
+                    continue
+            value.starting_line = starting_line
             self._writeComment(b"#", value.comment_after)
 
     # -------------------------------------------------------------------------- decode
