@@ -1,0 +1,39 @@
+{
+    "name": "ALACS",
+    "runArgs": ["--name=ALACS-devcontainer-vscode"],
+    "image": "mcr.microsoft.com/devcontainers/python:3.12",
+    "features": {
+        "ghcr.io/devcontainers/features/rust:1": "latest"
+    },
+    "containerEnv": {
+        "ALACS_DCID": "${devcontainerId}",
+        "ALACS_CWSF": "${containerWorkspaceFolder}",
+        "UV_CACHE_DIR": "${containerWorkspaceFolder}/python/.uv_cache",
+        "UV_NO_MANAGED_PYTHON": "true",
+        "UV_PROJECT": "${containerWorkspaceFolder}/python"
+    },
+    "updateContentCommand": {
+        "id": "echo 'ALACS=${devcontainerId}' >/tmp/.devcontainerId",
+        "uv": "pip install --disable-pip-version-check --user --only-binary :all: uv"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "charliermarsh.ruff",
+                "editorconfig.editorconfig",
+                "ms-python.python",
+                "ms-vscode.makefile-tools",
+                "redhat.vscode-yaml",
+                "rust-lang.rust-analyzer",
+                "streetsidesoftware.code-spell-checker",
+                "anthropic.claude-code"
+            ],
+            "settings": {
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                },
+                "yaml.schemas": {}
+            }
+        }
+    }
+}

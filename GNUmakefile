@@ -14,7 +14,7 @@ usage: ;@
 .PHONY: usage
 
 must-run-outside: ;@
-	if [ -d /opt/ALACS-build-devcontainer ]
+	if [[ -n "$$ALACS_DCID" && "$$(< /tmp/.devcontainerId)" == "ALACS=$$ALACS_DCID" ]]
 	then
 	  echo 'must run outside devcontainer'
 	  exit 1
@@ -22,7 +22,7 @@ must-run-outside: ;@
 .PHONY: must-run-outside
 
 must-run-inside: ;@
-	if [ ! -d /opt/ALACS-build-devcontainer ]
+	if [[ -z "$$ALACS_DCID" || "$$(< /tmp/.devcontainerId)" != "ALACS=$$ALACS_DCID" ]]
 	then
 	  echo 'must run inside devcontainer'
 	  exit 1
@@ -37,36 +37,32 @@ setup: must-run-outside ;@
 .PHONY: setup
 
 down: must-run-outside ;@
-	docker compose --project-directory .devcontainer down --volumes --remove-orphans
+	docker rm -f ALACS-devcontainer-vscode
 .PHONY: down
 
 # =====================================================================================
 
 python/test: must-run-inside
-	export PYTHONPATH=$(realpath python)
-	python -m alacs_test
+	uv run --dev -- python -m alacs_test
 .PHONY: python/test
 
 python/repl: must-run-inside
-	export PYTHONPATH=$(realpath python)
-	python -i -c "import alacs_test;from alacs import *"
+	uv run --dev -- python -i -c "import alacs_test;from alacs import *"
 .PHONY: python/repl
 
 python/profile: must-run-inside
-	export PYTHONPATH=$(realpath python)
 	mkdir -p /tmp/alacs_test
 	cd /tmp/alacs_test
-	python -m cProfile -o .pstats -m alacs_test
-	snakeviz .pstats
+	uv run --dev -- python -m cProfile -o .pstats -m alacs_test
+	uv run --dev -- snakeviz .pstats
 .PHONY: python/profile
 
 python/coverage: must-run-inside
-	export PYTHONPATH=$(realpath python)
 	mkdir -p /tmp/alacs_test
 	cd /tmp/alacs_test
-	coverage run --branch --source=alacs -m alacs_test
-	coverage html --directory=.
-	python -m http.server
+	uv run --dev -- coverage run --branch --source=alacs -m alacs_test
+	uv run --dev -- coverage html --directory=.
+	uv run --dev -- python -m http.server
 .PHONY: python/coverage
 
 # =====================================================================================

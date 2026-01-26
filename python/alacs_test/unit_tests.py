@@ -41,7 +41,7 @@ class Impossible(ALACS):
 
 class TestCase(unittest.TestCase):
     def assertRaisesExactly(self, ex: ExType, literal: str) -> ContextManager:
-        pattern = re.compile(f"\\A{re.escape(literal)}\\z")
+        pattern = re.compile(f"\\A{re.escape(literal)}\\Z")
         manager = self.assertRaisesRegex(ex, pattern)
         assert isinstance(manager, ContextManager)
         return manager

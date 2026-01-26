@@ -1,0 +1,36 @@
+[build-system]
+requires = ["uv_build >= 0.9.26, <0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "alacs"
+version = "0.1.0"
+description = "ALACS configuration file tools"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Comments Are Important", email = "comments.are.important@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "coverage",
+    "deepdiff",
+    "pydantic",
+    "PyYAML",
+    "ruamel.yaml",
+    "snakeviz",
+]
+
+[tool.uv.build-backend]
+module-name = "alacs"
+module-root = ""
