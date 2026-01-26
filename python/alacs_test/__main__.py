@@ -1,12 +1,11 @@
 import math
 import sys
 
-from . import TimedALACS, TimedRuamel
+from . import TimedALACS, TimedRuamel, unit_tests
 from .equals import diff_any, diff_translate, diff_ruamel
 from .generate import Random
-from .unit_tests import run_all_tests_return_problem_count
 
-if run_all_tests_return_problem_count():
+if unit_tests.problem_count():
     sys.exit()
 
 random = Random()

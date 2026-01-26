@@ -391,7 +391,7 @@ class TestDecode(TestCase):
             ALACS().decode(b"foo=bar\nfoo=baz")
 
 
-def run_all_tests_return_problem_count() -> int:
+def problem_count() -> int:
     argv = ["alacs_test", "unit_tests"]  # argv[0] is (fictional) name of program
     result = unittest.main(module=alacs_test, argv=argv, exit=False).result
     return len(result.failures) + len(result.errors)
