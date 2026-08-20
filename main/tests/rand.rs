@@ -1,4 +1,4 @@
-//! generate random files, run them through the library algorithms, and collect timing.
+//! generate random files, run them through the library algorithms.
 //! the randomness is not attempting to produce data that mimics the real world in any
 //! way. other benchmarks do that. instead, the ratios here are chosen to even out the
 //! library profiling line hit counts that would happen during this test: all the
@@ -7,9 +7,7 @@
 
 #![allow(missing_docs)]
 
-use assert_json_diff::assert_json_eq;
 use bumpalo::Bump;
-use criterion::{Criterion, criterion_group, criterion_main};
 use rand::prelude::IndexedRandom;
 use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng};
@@ -17,10 +15,9 @@ use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::{Parse, ParseError};
 use tindalwic::{Comment, Entry, File, Item};
-use tindalwic_serde::Verbose;
 
 /// a very blurry outline of some data. created first to be able to call the
-/// Arena/Builder API in the order it requires.
+/// Arena API in the order it requires.
 #[derive(Debug)]
 struct Silhouette {
     branches: usize, // recursive count excluding leaf nodes but including self
@@ -191,30 +188,22 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     }
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
+#[test]
+fn several() {
     let seed: u64 = rand::rng().random();
     println!("seed={seed}");
     let mut rng = SmallRng::seed_from_u64(seed);
-    c.bench_function("round-trip", |b| {
-        b.iter(|| {
-            let bump = Bump::new();
-            let mut arena = Arena::new(&bump);
-            let mut random = Random {
-                bump: &bump,
-                arena: &mut arena,
-                rng: &mut rng,
-                sample: Vec::new(), //"ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
-            };
-            let original: File = random.file(32);
-            let encoded = original.to_string();
-            let parsed = arena.panic_first_error(&encoded);
-            if original != parsed {
-                println!("\n{original:?}\n===\n{encoded}===");
-                assert_json_eq!(Verbose(original), Verbose(parsed));
-            }
-        })
-    });
+    for _loop in 0..5000 {
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
+        let mut random = Random {
+            bump: &bump,
+            arena: &mut arena,
+            rng: &mut rng,
+            sample: Vec::new(), //"ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
+        };
+        let original: File = random.file(32);
+        let encoded = original.to_string();
+        assert_eq!(original, arena.panic_first_error(&encoded));
+    }
 }
-
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);

@@ -3,7 +3,6 @@
 set shell := ["bash", "-uc"]
 
 all: fmt (test "-q") webapp coverage doc api lines msrv
-    cargo bench
 
 @_is_running_outside_devcontainer:
     [[ ! ( -e /tmp/.devcontainerId \
@@ -24,15 +23,15 @@ all: fmt (test "-q") webapp coverage doc api lines msrv
       | grep -q wasm32-unknown-unknown \
       || rustup target add wasm32-unknown-unknown
 
-@_binstall crate: _is_running_inside_devcontainer
+@_install crate: _is_running_inside_devcontainer
     cargo install --list \
       | grep -q {{ crate }} \
       || cargo binstall --no-confirm --only-signed --disable-telemetry {{ crate }}
 
-@_binstall_ver crate ver: _is_running_inside_devcontainer
+@_install_version crate version: _is_running_inside_devcontainer
     cargo install --list \
-      | grep -q "{{ crate }} v{{ ver }}" \
-      || cargo binstall --no-confirm --only-signed --disable-telemetry {{ crate }} --version {{ ver }}
+      | grep -q "{{ crate }} v{{ version }}" \
+      || cargo binstall --no-confirm --only-signed --disable-telemetry {{ crate }} --version {{ version }}
 
 # -----------------------------------------------------------------------------
 
@@ -44,13 +43,14 @@ test *OPTS: _is_running_inside_devcontainer
     cargo test -p tindalwic --test unit --features alloc {{OPTS}}
     cargo test -p tindalwic --test unit --features bumpalo {{OPTS}}
     cargo test -p tindalwic --test unit --all-features {{OPTS}}
+    cargo test -p tindalwic --test rand --all-features {{OPTS}}
     cargo test -p tindalwic --doc --all-features {{OPTS}}
     cargo test -p tindalwic --test trybuild --all-features {{OPTS}} \
       {{ if OPTS =~ quiet { '2> >(grep --line-buffered -P "^'+color+'test '+color+'tests/trybuild/.*[^o][^k]$")' } else {''} }}
     cargo test -p tindalwic-serde --test serde {{OPTS}}
 
-coverage: _is_running_inside_devcontainer (_binstall "cargo-llvm-cov") _nightly
-    LLVM_COV_FLAGS="--show-expansions --show-instantiations" \
+coverage: _is_running_inside_devcontainer (_install "cargo-llvm-cov") _nightly
+    yes | LLVM_COV_FLAGS="--show-expansions --show-instantiations" \
       cargo +nightly llvm-cov --html --branch -p tindalwic --test unit --all-features --show-missing-lines
 
 doc: _is_running_inside_devcontainer
@@ -59,16 +59,16 @@ doc: _is_running_inside_devcontainer
 fmt: _is_running_inside_devcontainer _nightly
     cargo +nightly fmt
 
-msrv: _is_running_inside_devcontainer (_binstall "cargo-msrv")
+msrv: _is_running_inside_devcontainer (_install "cargo-msrv")
     cargo msrv verify --path macros/
     cargo msrv verify --path main/
     cargo msrv verify --path serde/
     cargo msrv verify --path webapp/
 
-webapp: _is_running_inside_devcontainer _wasm (_binstall "wasm-opt")
+webapp: _is_running_inside_devcontainer _wasm (_install "wasm-opt")
     cargo build -p tindalwic-webapp --target wasm32-unknown-unknown --profile dev
     cargo build -p tindalwic-webapp --target wasm32-unknown-unknown --profile release-small
-    just _binstall_ver wasm-bindgen-cli "$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$=\1=')"
+    just _install_version wasm-bindgen-cli "$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$=\1=')"
     wasm-bindgen --target web --keep-debug \
       --out-dir target/webapp-dev \
       target/wasm32-unknown-unknown/debug/tindalwic_webapp.wasm
@@ -81,7 +81,7 @@ webapp: _is_running_inside_devcontainer _wasm (_binstall "wasm-opt")
     cd target/webapp-release ; wasm-opt -Oz --enable-bulk-memory \
       -o tindalwic_webapp_bg.wasm tindalwic_webapp_bg.wasm
 
-api: _is_running_inside_devcontainer (_binstall "cargo-public-api") _nightly
+api: _is_running_inside_devcontainer (_install "cargo-public-api") _nightly
     mkdir -p target/public-api/{all,default}
     cargo public-api -p tindalwic --target-dir target/public-api/default \
       >target/public-api/tindalwic-default.api
@@ -94,7 +94,7 @@ api: _is_running_inside_devcontainer (_binstall "cargo-public-api") _nightly
       | sed -E -e 's=^pub (.*)=|\1|property|=' \
       | LC_ALL=C sort -u >target/public-api/tindalwic-all.org
 
-lines: _is_running_inside_devcontainer (_binstall "cargo-llvm-lines")
+lines: _is_running_inside_devcontainer (_install "cargo-llvm-lines")
     cargo llvm-lines -p tindalwic --all-features >target/llvm-lines.out
 
 # -----------------------------------------------------------------------------
@@ -110,7 +110,7 @@ down: _is_running_outside_devcontainer
 httpd: _is_running_outside_devcontainer
     cd target ; python -m http.server >&http.server.log
 
-ghraw: _is_running_outside_devcontainer
+links: _is_running_outside_devcontainer
     #!/usr/bin/env bash
     set -x
     PROJECT='https://raw.githubusercontent.com/comments-are-important/tindalwic'

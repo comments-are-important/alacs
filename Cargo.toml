@@ -3,7 +3,7 @@ members = ["macros", "main", "serde", "webapp"]
 resolver = "2"
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["Comments Are Important <comments.are.important@gmail.com>"]
@@ -11,11 +11,9 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/comments-are-important/tindalwic"
 
 [workspace.dependencies]
-assert-json-diff = "2.0.2"
 bumpalo = "3.20.2"
 bytes = "1.11.1"
 console_error_panic_hook = "0.1.7"
-criterion = "0.8.2"
 js-sys = "0.3.98"
 markdown = "1.0.0"
 proc-macro2 = "1.0.106"

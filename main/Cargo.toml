@@ -21,6 +21,7 @@ tindalwic-macros = { path = "../macros" }
 
 [dev-dependencies]
 markdown = { workspace = true }
+rand = { workspace = true }
 trybuild = { workspace = true }
 
 [lints]
