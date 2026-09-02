@@ -5,18 +5,20 @@
 
 ;# The Python parser is a canonical example of a custom lexer that emits INDENT/DEDENT
 ;# tokens. That kind of language greedily consumes all the whitespace at the start of
-;# each line. But Tindalwic is different: only TAB chars count, and the number is
-;# strictly monotonic. INDENT adds exactly one TAB, and DEDENT removes exactly one TAB.
+;# each line. But Tindalwic is different: only HTAB chars count, and the number is
+;# strictly monotonic. INDENT adds exactly one HTAB, and DEDENT removes exactly one HTAB.
+;# So the first char on a line after the indentation can be a HTAB.
 
 ;# Because this file is not meant for tools, a non-standard EXCLUDE is imagined...
 
 LF = %x0A
-TAB = %x09
+HTAB = %x09
+OCTET = %x00-FF
 dot = EXCLUDE( %x00-FF, LF ) ;# these rules do not validate/decode the 8-bit UTF-8
-restricted = EXCLUDE( dot, TAB / "#<>[]{}/=" )
+restricted = EXCLUDE( dot, HTAB / "#<>[]{}/@=" )
 
 line = *dot LF
-utf8 = INDENT *line DEDENT ;# first char of line can be TAB
+utf8 = INDENT *line DEDENT ;# first char of line can be HTAB
 comment = "#" line [utf8]
 
 ;# linear arrays
@@ -33,11 +35,11 @@ list-short = [restricted *dot] LF
 key-comment = [LF] "//" line [utf8]
 
 dict = INDENT [comment] *dict-item DEDENT
-dict-item = ( dict-text / dict-list / dict-dict / dict-short ) [comment]
-dict-text = [key-comment] "<" *dot ">" LF [utf8]
-dict-list = [key-comment] "[" *dot "]" LF [list]
-dict-dict = [key-comment] "{" *dot "}" LF [dict]
-dict-short = [key-comment] restricted *( EXCLUDE( dot, "=" ) ) "=" line
+dict-item = [key-comment] ( dict-text / dict-list / dict-dict / dict-short ) [comment]
+dict-text = ( "<" *dot ">" / "@" line utf8 "<>" ) LF [utf8]
+dict-list = ( "[" *dot "]" / "@" line utf8 "[]" ) LF [list]
+dict-dict = ( "{" *dot "}" / "@" line utf8 "{}" ) LF [dict]
+dict-short = restricted *( EXCLUDE( dot, "=" ) ) "=" line
 
 ;# outermost context
 

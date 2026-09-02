@@ -1,0 +1,28 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "tindalwic",
+      "scope": "text.tindalwic",
+      "file-types": [ "tindalwic" ]
+    }
+  ],
+  "metadata": {
+    "version": "0.5.0",
+    "description": "Text In Nested Dictionaries and Lists With Important Comments",
+    "links": {
+      "repository": "https://github.com/comments-are-important/tindalwic"
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "java": false,
+    "kotlin": false,
+    "node": false,
+    "python": false,
+    "rust": false,
+    "swift": false,
+    "zig": false
+  }
+}
