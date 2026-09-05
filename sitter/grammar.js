@@ -5,75 +5,74 @@ export default grammar({
     name: "tindalwic",
 
     extras: $ => [
-        // empty to disable the builtin ignore whitespace stuff
-    ],
-
-    externals: $ => [
-        $.NEWLINE, // either EOF or a LF char
-        // these three symbols are only recognized if column > 0:
-        $._ANGLE,   // a key with lookahead: '>' $.NEWLINE
-        $._SQUARE,  // a key with lookahead: ']' $.NEWLINE
-        $._CURLY,   // a key with lookahead: '}' $.NEWLINE
-        // these four symbols are only recognized at logical start of line:
-        $.TABS,     // the expected indentation (only at column 0)
-        $._INDENT,  // ++expected if zero-width lookahead (only at column 0)
-        $._DEDENT,  // --expected if zero-width lookahead (at EOF or column 0)
-        $.EPILOG,   // --expected if (expected-1) indentation with lookahead '#'
-        // there is nothing the scanner can do to help with:
-        $._RECOVERY // sentinel for the error condition
+        // empty to disable the builtin ignore whitespace stuff.
+        // note "insert_final_newline = false" in `.editorconfig`: newlines here aren't
+        // typical line termination chars. tindalwic does not use quotation for strings,
+        // so a trailing (CR)LF at EOF can't be ignored. instead it uses things like
+        // RegExp `/[^\n]*/` to finish lines without consuming any termination chars.
+        // think of NEW_LINE as: "nope, not done yet, here's another line to parse".
     ],
 
     rules: {
 
-        file: $ => seq(
-            field('hashbang', optional(seq('#!', $.flow))),
-            field('prolog', optional(seq('#', $.flow))),
-            repeat($.entry)
+        file: $ => seq(optional($.shebang), optional($.prolog), repeat($.entry)),
+        dict: $ => seq($.INDENT, optional($.prolog), repeat($.entry), $.DEDENT),
+        list: $ => seq($.INDENT, optional($.prolog), repeat($.item), $.DEDENT),
+
+        line: $ => /[^\n]*/,
+        flow: $ => seq($.line, repeat(seq($.NEW_LINE, $.MARGIN, '\t', $.line))),
+        text: $ => seq($.NEW_LINE, $.MARGIN, '\t', $.flow),
+
+        shebang: $ => seq('#!', $.flow),
+        prolog: $ => seq($.NEW_LINE, $.MARGIN, '#', $.flow),
+        epilog: $ => seq($.NEW_LINE, $.MARGIN, '#', $.flow),
+        key_comment: $ => seq($.NEW_LINE, $.MARGIN, '//', $.flow),
+
+        item: $ => seq(
+            $.NEW_LINE, $.MARGIN, $._value,
+            optional($.epilog),
+        ),
+        _value: $ => choice(
+            seq('<>', optional($.text)),
+            seq('[]', optional($.list)),
+            seq('{}', optional($.dict)),
+            $.SHORT_ITEM,
         ),
 
-        dict: $ => seq(
-            $._INDENT,
-            field('prolog', optional(seq($.TABS, '#', $.flow))),
-            repeat(seq($.TABS, $.entry)),
-            $._DEDENT
-        ),
-
-        list: $ => seq(
-            $._INDENT,
-            field('prolog', optional(seq($.TABS, '#', $.flow))),
-            repeat(seq($.TABS, $.item)),
-            $._DEDENT
-        ),
-
-        utf8: $=> /[^\n]*/,
-        text: $ => seq(
-            $._INDENT,
-            repeat(seq($.TABS, $.utf8, $.NEWLINE)),
-            $._DEDENT
-        ),
-        flow: $ => seq($.utf8, $.NEWLINE, optional($.text)),
-
+        gap: $ => $.EMPTY_LINE,
         entry: $ => seq(
-            field('gap', optional('\n')),
-            field('before', optional(seq('//', $.flow))),
-            choice(
-                seq('@', field('key', $.flow), $.TABS, $.item),
-                seq('<', field('key', $._ANGLE), '>', $.NEWLINE, optional($.text)),
-                seq('[', field('key', $._SQUARE), ']', $.NEWLINE, optional($.list)),
-                seq('{', field('key', $._CURLY), '}', $.NEWLINE, optional($.dict)),
-                //seq('=', /*field('key', ''),*/ /[^\n]*/), $.NEWLINE),
-                seq(field('key', /[^#/<\[@{=\t\n][^\n=]*/), '=', $.flow)
-            )
+            optional($.gap),
+            optional($.key_comment),
+            $.NEW_LINE, $.MARGIN, $._key_value,
+            optional($.epilog),
         ),
-
-        item: $ => choice(
-            seq('<>', $.NEWLINE, optional($.text)),
-            seq('[]', $.NEWLINE, optional($.list)),
-            seq('{}', $.NEWLINE, optional($.dict)),
-            //seq($.NEWLINE),
-            seq(/[^#/<\[@{=\t\n][^\n]*/, $.NEWLINE)
+        _key_value: $ => choice(
+            seq('@', $.flow, $.NEW_LINE, $.MARGIN, $._value),
+            seq('<', $.TEXT_KEY, '>', optional($.text)),
+            seq('[', $.LIST_KEY, ']', optional($.list)),
+            seq('{', $.DICT_KEY, '}', optional($.dict)),
+            seq($.SHORT_KEY, '=', $.line),
         ),
 
     },
+
+    externals: $ => [
+        // first 5 tokens are about structure and may be `valid_symbols` in any call...
+        $.NEW_LINE,   // LF or zero-width beginning of file
+        $.MARGIN,     // the expected number of TAB chars starting at column 0
+        $.INDENT,     // zero-width ++margin if peek: LF + more TABs than expected
+        $.DEDENT,     // zero-width --margin if EOF or peek: LF + insufficient TABs
+        $.EMPTY_LINE, // NEW_LINE with peek: LF (but not EOF)
+        // these 5 tokens are mutually exclusive with each other (but not those above)...
+        $.SHORT_ITEM, // empty or /[^[:reserved_char:]][^\n]*/
+        $.SHORT_KEY,  // empty or /[^[:reserved_char:]][^=\n]*/
+        $.TEXT_KEY,   // $.line if peek: '>' + (EOF|LF)
+        $.LIST_KEY,   // $.line if peek: ']' + (EOF|LF)
+        $.DICT_KEY,   // $.line if peek: '}' + (EOF|LF)
+        // the last token must not be used by any rules in the grammar...
+        $.RECOVERY    // sentinel indicating error recovery
+    ],
+
+    conflicts: $ => [[$.flow], [$.item], [$._value], [$.entry], [$._key_value]],
 
 });

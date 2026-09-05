@@ -1,23 +1,13 @@
 #include "tree_sitter/alloc.h"
 #include "tree_sitter/parser.h"
+#include <string.h>
 
-enum TokenType {
-    NEWLINE, // either EOF or a LF char
-    // these three symbols are only recognized if column > 0:
-    ANGLE,   // a key with lookahead: '>' NEWLINE
-    SQUARE,  // a key with lookahead: ']' NEWLINE
-    CURLY,   // a key with lookahead: '}' NEWLINE
-    // these four symbols are only recognized at logical start of line:
-    TABS,    // the expected indentation (only at column 0)
-    INDENT,  // ++expected if zero-width lookahead (only at column 0)
-    DEDENT,  // --expected if zero-width lookahead (at EOF or column 0)
-    EPILOG,  // --expected if (expected-1) indentation with lookahead '#'
-    // there is nothing the scanner can do to help with:
-    RECOVERY // sentinel for the error condition
-};
+typedef struct {
+    uint32_t margin;
+} TindalwicScanner;
 
 void *tree_sitter_tindalwic_external_scanner_create() {
-    return ts_calloc(1, sizeof(uint32_t));
+    return ts_malloc(sizeof(TindalwicScanner));
 }
 
 void tree_sitter_tindalwic_external_scanner_destroy(void *payload) {
@@ -25,139 +15,207 @@ void tree_sitter_tindalwic_external_scanner_destroy(void *payload) {
 }
 
 unsigned tree_sitter_tindalwic_external_scanner_serialize(void *payload, char *buffer) {
-    *(uint32_t *)buffer = *(uint32_t *)payload;
-    return sizeof(uint32_t);
+    memcpy(buffer, payload, sizeof(TindalwicScanner));
+    return sizeof(TindalwicScanner);
 }
 
 void tree_sitter_tindalwic_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
-    *(uint32_t *)payload = (length == sizeof(uint32_t)) ? *(uint32_t *)buffer : 0;
+    if (length == sizeof(TindalwicScanner))
+        memcpy(payload, buffer, sizeof(TindalwicScanner));
+    else {
+        TindalwicScanner *scanner = (TindalwicScanner *)payload;
+        scanner->margin = UINT32_MAX;
+    }
+}
+
+static bool reserved_char(int32_t ch) {
+    switch (ch) {
+        case '\n': case '\t': case '#': case '/': case '@': case '=':
+        case '<': case '>': case '[': case ']': case '{': case '}':
+            return true;
+    }
+    return false;
+}
+
+enum TindalwicToken {
+    // first 5 tokens are about structure and may be `valid_symbols` in any call...
+    NEW_LINE,   // LF or zero-width beginning of file
+    MARGIN,     // the expected number of TAB chars starting at column 0
+    INDENT,     // zero-width ++margin if peek: LF + more TABs than expected
+    DEDENT,     // zero-width --margin if EOF or peek: LF + insufficient TABs
+    EMPTY_LINE, // NEW_LINE with peek: LF (but not EOF)
+    // these 5 tokens are mutually exclusive with each other (but not those above)...
+    SHORT_ITEM, // empty or /[^[:reserved_char:]][^\n]*/
+    SHORT_KEY,  // empty or /[^[:reserved_char:]][^=\n]*/
+    TEXT_KEY,   // $.line if peek: '>' + (EOF|LF)
+    LIST_KEY,   // $.line if peek: ']' + (EOF|LF)
+    DICT_KEY,   // $.line if peek: '}' + (EOF|LF)
+    // the last token must not be used by any rules in the grammar...
+    RECOVERY    // sentinel indicating error recovery
+    // changes to anything above needs to be synched to:
+    //  + externals in grammar (copy-n-paste from here then add `$.` prefix)
+    //  + the long repeated `%s%s...%s%s` printf specifiers and the arguments
+    //  + the `count_exclusive` function immediately below
+};
+
+static int count_exclusive(const bool *valid_symbols) {
+    return (valid_symbols[SHORT_ITEM] + valid_symbols[SHORT_KEY]
+        + valid_symbols[TEXT_KEY] + valid_symbols[LIST_KEY] + valid_symbols[DICT_KEY]);
+}
+
+static bool key_closed(char marker, TSLexer *lexer) {
+    bool closed = false;
+    while (lexer->lookahead != '\n' && !lexer->eof(lexer)) {
+        if (lexer->lookahead != marker) closed = false;
+        else { lexer->mark_end(lexer); closed = true; }
+        lexer->advance(lexer, false); }
+    return closed;
 }
 
 bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
-    uint32_t *indent = (uint32_t *)payload;
+    TindalwicScanner *scanner = (TindalwicScanner *)payload;
+    bool beginning = scanner->margin == UINT32_MAX;
 
     #define DEBUG_log(...) lexer->log(lexer, __VA_ARGS__)
-
     if (valid_symbols[RECOVERY]) {
-        DEBUG_log("scanner=>false (error recovery)");
+        DEBUG_log(
+            "scanner.%d%s =>false (error recovery)",
+            beginning?0:scanner->margin, beginning?"*":""
+        );
         return false;
     }
-    uint32_t start = lexer->get_column(lexer);
     DEBUG_log(
-        "scanner%s%s%s%s%s%s%s%s indent=%d column=%d",
-        valid_symbols[NEWLINE]?" NEWLINE":"",
-        valid_symbols[ANGLE]?" ANGLE":"",
-        valid_symbols[SQUARE]?" SQUARE":"",
-        valid_symbols[CURLY]?" CURLY":"",
-        valid_symbols[TABS]?" TABS":"",
+        "scanner.%d%s %s%s%s%s%s%s%s%s%s%s%s",
+        beginning?0:scanner->margin, beginning?"*":"",
+        valid_symbols[NEW_LINE]?" NEW_LINE":"",
+        valid_symbols[MARGIN]?" MARGIN":"",
         valid_symbols[INDENT]?" INDENT":"",
         valid_symbols[DEDENT]?" DEDENT":"",
-        valid_symbols[EPILOG]?" EPILOG":"",
-        *indent, start
+        valid_symbols[EMPTY_LINE]?" EMPTY_LINE":"",
+        valid_symbols[SHORT_ITEM]?" SHORT_ITEM":"",
+        valid_symbols[SHORT_KEY]?" SHORT_KEY":"",
+        valid_symbols[TEXT_KEY]?" TEXT_KEY":"",
+        valid_symbols[LIST_KEY]?" LIST_KEY":"",
+        valid_symbols[DICT_KEY]?" DICT_KEY":"",
+        valid_symbols[RECOVERY]?" RECOVERY":""
     );
 
-    if (lexer->eof(lexer)) {
+    #define RETURN_false(...) { \
+        DEBUG_log("scanner =>false" __VA_ARGS__); \
+        return false; }
+    #define RETURN_true(symbol, ...) { \
+        DEBUG_log("scanner =>" #symbol __VA_ARGS__); \
+        lexer->result_symbol = symbol; \
+        return true; }
 
-        if (valid_symbols[DEDENT] && *indent > 0) {
-            --*indent;
-            lexer->result_symbol = DEDENT;
-            DEBUG_log("scanner=>DEDENT (at EOF)");
-            return true;
-        }
-        if (valid_symbols[NEWLINE]) {
-            lexer->result_symbol = NEWLINE;
-            DEBUG_log("scanner=>NEWLINE (at EOF)");
-            return true;
-        }
+    lexer->mark_end(lexer); // we will be doing a lot of peeking ahead
 
-        DEBUG_log("scanner=>false (at EOF)");
-        return false;
+    if (beginning) {
+        if (lexer->eof(lexer))
+            RETURN_false(" (empty file)");
+        if (valid_symbols[EMPTY_LINE] && lexer->lookahead == '\n') {
+            scanner->margin = 0;
+            RETURN_true(EMPTY_LINE, " (at beginning)");
+        }
+        if (valid_symbols[NEW_LINE]) {
+            scanner->margin = 0;
+            RETURN_true(NEW_LINE);
+        }
+        RETURN_false(" (beginning must NEW_LINE/EMPTY_LINE - fix grammar rules)");
     }
 
-    if (valid_symbols[NEWLINE] && lexer->lookahead == '\n') {
+    if (count_exclusive(valid_symbols) > 1)
+        // it's very difficult to know which symbols will be requested together: an edit
+        // to the rules that seems innocuous could introduce an exclusivity violation.
+        // better to have a clear log message than let the code stumble through an
+        // inconsistent series of advance/lookahead/mark_end steps.
+        RETURN_false(" (more than one exclusive symbol requested - fix grammar rules)");
+
+    if (valid_symbols[SHORT_ITEM]) {
+        if (lexer->eof(lexer))
+            RETURN_true(SHORT_ITEM, " (at EOF)");
+        if (lexer->lookahead == '\n')
+            RETURN_true(SHORT_ITEM, " (at EOL)");
+        if (reserved_char(lexer->lookahead))
+            RETURN_false(" (1st char is reserved)");
         lexer->advance(lexer, false);
-        lexer->result_symbol = NEWLINE;
-        DEBUG_log("scanner=>NEWLINE");
-        return true;
-    }
-
-    lexer->mark_end(lexer); // we will be peeking ahead without growing the token
-
-    if (start) { // not at beginning of line
-
-        int32_t marker = valid_symbols[ANGLE] ? '>'
-            : valid_symbols[SQUARE] ? ']'
-            : valid_symbols[CURLY] ? '}'
-            : 0;
-        if (marker) {
-            bool closed = false;
-            while (lexer->lookahead != '\n' && !lexer->eof(lexer)) {
-                if (lexer->lookahead != marker)
-                    closed = false;
-                else {
-                    lexer->mark_end(lexer);
-                    closed = true;
-                }
-                lexer->advance(lexer, false);
-            }
-            if (!closed) {
-                DEBUG_log("scanner=>false (not closed)");
-                return false;
-            } else if (valid_symbols[ANGLE]) {
-                lexer->result_symbol = ANGLE;
-                DEBUG_log("scanner=>ANGLE");
-                return true;
-            } else if (valid_symbols[SQUARE]) {
-                lexer->result_symbol = SQUARE;
-                DEBUG_log("scanner=>SQUARE");
-                return true;
-            } else if (valid_symbols[CURLY]) {
-                lexer->result_symbol = CURLY;
-                DEBUG_log("scanner=>CURLY");
-                return true;
-            }
-        }
-
-    } else { // starting at column 0
-
-        if (valid_symbols[TABS] && !*indent) {
-            lexer->result_symbol = TABS;
-            DEBUG_log("scanner=>TABS (zero-width)");
-            return true;
-        }
-        uint32_t count = 0;
-        while (lexer->lookahead == '\t'){
+        while (lexer->lookahead != '\n' && !lexer->eof(lexer))
             lexer->advance(lexer, false);
-            ++count;
-            if (valid_symbols[TABS] && count == *indent) {
-                lexer->mark_end(lexer);
-                lexer->result_symbol = TABS;
-                DEBUG_log("scanner=>TABS");
-                return true;
-            }
-            if (valid_symbols[INDENT] && count > *indent) {
-                ++*indent;
-                lexer->result_symbol = INDENT;
-                DEBUG_log("scanner=>INDENT");
-                return true;
-            }
-        }
-        if (valid_symbols[EPILOG] && count + 1 == *indent && lexer->lookahead == '#') {
-            lexer->mark_end(lexer);
-            --*indent;
-            lexer->result_symbol = EPILOG;
-            DEBUG_log("scanner=>EPILOG");
-            return true;
-        }
-        if (valid_symbols[DEDENT] && *indent) {
-            --*indent;
-            lexer->result_symbol = DEDENT;
-            DEBUG_log("scanner=>DEDENT");
-            return true;
-        }
-
+        lexer->mark_end(lexer);
+        RETURN_true(SHORT_ITEM);
+    }
+    if (valid_symbols[SHORT_KEY]) {
+        if (lexer->eof(lexer))
+            RETURN_true(SHORT_KEY, " (at EOF)");
+        if (lexer->lookahead == '\n')
+            RETURN_true(SHORT_KEY, " (at EOL)");
+        if (reserved_char(lexer->lookahead))
+            RETURN_false(" (1st char is reserved)");
+        lexer->advance(lexer, false);
+        while (lexer->lookahead != '\n' && lexer->lookahead != '=' && !lexer->eof(lexer))
+            lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        RETURN_true(SHORT_KEY);
+    }
+    if (valid_symbols[TEXT_KEY]) {
+        if (!key_closed('>', lexer))
+            RETURN_false(" (not closed)");
+        RETURN_true(TEXT_KEY);
+    }
+    if (valid_symbols[LIST_KEY]) {
+        if (!key_closed(']', lexer))
+            RETURN_false(" (not closed)");
+        RETURN_true(LIST_KEY);
+    }
+    if (valid_symbols[DICT_KEY]) {
+        if (!key_closed('}', lexer))
+            RETURN_false(" (not closed)");
+        RETURN_true(DICT_KEY);
     }
 
-    DEBUG_log("scanner=>false");
-    return false;
+    if (lexer->eof(lexer)) {
+        if (valid_symbols[DEDENT]) {
+            if (scanner->margin == 0)
+                RETURN_false(" (unbalanced DEDENT)")
+            --scanner->margin;
+            RETURN_true(DEDENT, " (at EOF)");
+        }
+        RETURN_false(" (at EOF)");
+    }
+    bool linefeed = lexer->lookahead == '\n';
+    if (linefeed) // kinda hacky way to share TAB counting code for all valid_symbols
+        lexer->advance(lexer, false);
+    if (lexer->get_column(lexer) != 0)
+        RETURN_false(" (column=%d != 0)", lexer->get_column(lexer));
+    if (valid_symbols[EMPTY_LINE] && linefeed && lexer->lookahead == '\n') {
+        lexer->mark_end(lexer);
+        RETURN_true(EMPTY_LINE);
+    }
+    if (valid_symbols[NEW_LINE] && linefeed) {
+        lexer->mark_end(lexer);
+        RETURN_true(NEW_LINE);
+    }
+    uint32_t tabs = 0;
+    for ( ; tabs != scanner->margin && lexer->lookahead == '\t' ; ++tabs)
+        lexer->advance(lexer, false);
+    if (lexer->get_column(lexer) != tabs)
+        RETURN_false(" (column=%d != %d)", lexer->get_column(lexer), tabs);
+    if (valid_symbols[DEDENT] && tabs != scanner->margin) {
+        if (scanner->margin == 0)
+            RETURN_false(" (unbalanced DEDENT)");
+        --scanner->margin;
+        RETURN_true(DEDENT);
+    }
+    if (valid_symbols[INDENT] && tabs == scanner->margin && lexer->lookahead == '\t') {
+        if (scanner->margin >= UINT32_MAX - 1)
+            RETURN_false(" (excessive INDENT)");
+        ++scanner->margin;
+        RETURN_true(INDENT);
+    }
+    if (valid_symbols[MARGIN] && tabs == scanner->margin && !linefeed) {
+        lexer->mark_end(lexer);
+        RETURN_true(MARGIN);
+    }
+
+    RETURN_false(" (nothing matched)");
 }

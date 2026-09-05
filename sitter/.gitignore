@@ -1,0 +1,5 @@
+/package-lock.json
+/tree-sitter-tindalwic.wasm
+/node_modules/
+/src/
+!src/scanner.c
