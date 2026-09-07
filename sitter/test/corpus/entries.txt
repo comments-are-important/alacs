@@ -1,0 +1,60 @@
+===
+first has gap
+===
+
+key=value
+---
+(file (entry (gap) (SHORT_KEY) (line)))
+
+===
+first has key comment 1 line
+===
+// a short paragraph about the key that follows
+key=value
+---
+(file (entry (key_comment (line)) (SHORT_KEY) (line)))
+
+===
+first has key comment 3 lines
+===
+// a short paragraph about the key that follows
+	# this is a markdown H1
+	and another short paragraph
+key=value
+---
+(file (entry (key_comment (line) (line) (line)) (SHORT_KEY) (line)))
+
+===
+first has gap and key comment
+===
+
+// a longer paragraph
+	about the key that follows
+key=value
+---
+(file (entry (gap) (key_comment (line) (line)) (SHORT_KEY) (line)))
+
+===
+the different entry types
+===
+<first key>
+	start of text block, just one linefeed
+	last line of text block
+# epilog comment about the text block above
+
+// the empty string can be a key
+[]
+	# prolog comment for this empty list
+
+{third {tricky} key}
+	key=value
+
+@for multi-line keys
+	use the at sign then empty brackets...
+{}
+---
+(file
+  (entry (TEXT_KEY) (text (line) (line)) (epilog (line)))
+  (entry (gap) (key_comment (line)) (LIST_KEY) (list (prolog (line))))
+  (entry (gap) (dict_key) (dict (entry (SHORT_KEY) (line))))
+  (entry (gap) (LONG_KEY (line) (line))))

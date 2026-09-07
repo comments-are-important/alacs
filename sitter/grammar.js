@@ -20,16 +20,16 @@ export default grammar({
         list: $ => seq($.INDENT, optional($.prolog), repeat($.item), $.DEDENT),
 
         line: $ => /[^\n]*/,
-        flow: $ => seq($.line, repeat(seq($.NEW_LINE, $.MARGIN, '\t', $.line))),
-        text: $ => seq($.NEW_LINE, $.MARGIN, '\t', $.flow),
+        _flow: $ => seq($.line, repeat(seq($._NEW_LINE, $._MARGIN, '\t', $.line))),
+        text: $ => seq($._NEW_LINE, $._MARGIN, '\t', $._flow),
 
-        shebang: $ => seq('#!', $.flow),
-        prolog: $ => seq($.NEW_LINE, $.MARGIN, '#', $.flow),
-        epilog: $ => seq($.NEW_LINE, $.MARGIN, '#', $.flow),
-        key_comment: $ => seq($.NEW_LINE, $.MARGIN, '//', $.flow),
+        shebang: $ => seq($._NEW_LINE, $._MARGIN, '#!', $._flow),
+        prolog: $ => seq($._NEW_LINE, $._MARGIN, '#', $._flow),
+        epilog: $ => seq($._NEW_LINE, $._MARGIN, '#', $._flow),
+        key_comment: $ => seq($._NEW_LINE, $._MARGIN, '//', $._flow),
 
         item: $ => seq(
-            $.NEW_LINE, $.MARGIN, $._value,
+            $._NEW_LINE, $._MARGIN, $._value,
             optional($.epilog),
         ),
         _value: $ => choice(
@@ -39,15 +39,15 @@ export default grammar({
             $.SHORT_ITEM,
         ),
 
-        gap: $ => $.EMPTY_LINE,
+        gap: $ => $._EMPTY_LINE,
         entry: $ => seq(
             optional($.gap),
             optional($.key_comment),
-            $.NEW_LINE, $.MARGIN, $._key_value,
+            $._NEW_LINE, $._MARGIN, $._key_value,
             optional($.epilog),
         ),
         _key_value: $ => choice(
-            seq('@', $.flow, $.NEW_LINE, $.MARGIN, $._value),
+            seq('@', $._flow, $._NEW_LINE, $._MARGIN, $._value),
             seq('<', $.TEXT_KEY, '>', optional($.text)),
             seq('[', $.LIST_KEY, ']', optional($.list)),
             seq('{', $.DICT_KEY, '}', optional($.dict)),
@@ -57,22 +57,19 @@ export default grammar({
     },
 
     externals: $ => [
-        // first 5 tokens are about structure and may be `valid_symbols` in any call...
-        $.NEW_LINE,   // LF or zero-width beginning of file
-        $.MARGIN,     // the expected number of TAB chars starting at column 0
-        $.INDENT,     // zero-width ++margin if peek: LF + more TABs than expected
-        $.DEDENT,     // zero-width --margin if EOF or peek: LF + insufficient TABs
-        $.EMPTY_LINE, // NEW_LINE with peek: LF (but not EOF)
-        // these 5 tokens are mutually exclusive with each other (but not those above)...
-        $.SHORT_ITEM, // empty or /[^[:reserved_char:]][^\n]*/
-        $.SHORT_KEY,  // empty or /[^[:reserved_char:]][^=\n]*/
-        $.TEXT_KEY,   // $.line if peek: '>' + (EOF|LF)
-        $.LIST_KEY,   // $.line if peek: ']' + (EOF|LF)
-        $.DICT_KEY,   // $.line if peek: '}' + (EOF|LF)
-        // the last token must not be used by any rules in the grammar...
-        $.RECOVERY    // sentinel indicating error recovery
+        $._NEW_LINE,
+        $._MARGIN,
+        $.INDENT,
+        $.DEDENT,
+        $._EMPTY_LINE,
+        $.SHORT_ITEM,
+        $.SHORT_KEY,
+        $.TEXT_KEY,
+        $.LIST_KEY,
+        $.DICT_KEY,
+        $.RECOVERY
     ],
 
-    conflicts: $ => [[$.flow], [$.item], [$._value], [$.entry], [$._key_value]],
+    conflicts: $ => [[$._flow], [$.item], [$._value], [$.entry], [$._key_value]],
 
 });

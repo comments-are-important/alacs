@@ -199,6 +199,7 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
     for ( ; tabs != scanner->margin && lexer->lookahead == '\t' ; ++tabs)
         lexer->advance(lexer, false);
     if (lexer->get_column(lexer) != tabs)
+      // !!! OOPS TODO get_column has to loop back and count each time, so don't call it unnecessarily
         RETURN_false(" (column=%d != %d)", lexer->get_column(lexer), tabs);
     if (valid_symbols[DEDENT] && tabs != scanner->margin) {
         if (scanner->margin == 0)

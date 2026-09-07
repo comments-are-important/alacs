@@ -1,0 +1,108 @@
+===
+empty file
+===
+---
+(file)
+
+===
+shebang alone empty
+===
+#!
+---
+(file (shebang (line)))
+
+===
+shebang alone program only
+===
+#!/usr/bin/env tindalwic
+---
+(file (shebang (line)))
+
+===
+shebang alone program + 1 line
+===
+#!/usr/bin/env -S tindalwic --to-json
+	that's a fake app
+---
+(file (shebang (line) (line)))
+
+===
+shebang alone program + 2 lines
+===
+#!/usr/bin/env -S tindalwic --to-json
+	that's a fake app
+	maybe create it?
+---
+(file (shebang (line) (line) (line)))
+
+===
+prolog alone empty
+===
+#
+---
+(file (prolog (line)))
+
+===
+prolog alone 1 line
+===
+# this is a short paragraph
+---
+(file (prolog (line)))
+
+===
+prolog alone 3 lines
+===
+#
+	# this is a markdown H1 (follows a blank line)
+	and a short paragraph
+---
+(file (prolog (line) (line) (line)))
+
+===
+shebang + prolog
+===
+#!/usr/bin/env -S tindalwic --to-json
+	that's a fake app
+	maybe create it?
+#
+	# this is a markdown H1 (follows a blank line)
+	and a short paragraph
+---
+(file
+  (shebang (line) (line) (line))
+  (prolog (line) (line) (line)))
+
+===
+shebang + prolog that looks like shebang
+===
+#!shebang
+#!prolog
+---
+(file (shebang (line)) (prolog (line)))
+
+===
+prolog + shebang/comment
+:error
+===
+#comment
+#!shebang
+---
+
+===
+short key alone
+===
+key=value
+---
+(file (entry (SHORT_KEY) (line)))
+
+===
+shebang + prolog + short key
+===
+#!shebang
+#prolog
+key=value
+---
+(file
+  (shebang (line))
+  (prolog (line))
+  (entry (SHORT_KEY) (line)))
