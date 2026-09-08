@@ -1,0 +1,20 @@
+===
+one empty text item
+===
+[]
+	<>
+---
+(file (entry (key) (list (item (text)))))
+
+===
+one item of short text
+===
+[]
+	reserved chars #/@=<>[]{} TABs are fine in one-liner short text...
+	<>
+		#EXCEPT for 1st char
+---
+(file (entry (key) (list
+  (item (text))
+  (item (text (line)))
+)))

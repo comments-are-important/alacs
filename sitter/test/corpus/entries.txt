@@ -4,7 +4,7 @@ first has gap
 
 key=value
 ---
-(file (entry (gap) (SHORT_KEY) (line)))
+(file (entry (gap) (key) (text (line))))
 
 ===
 first has key comment 1 line
@@ -12,7 +12,7 @@ first has key comment 1 line
 // a short paragraph about the key that follows
 key=value
 ---
-(file (entry (key_comment (line)) (SHORT_KEY) (line)))
+(file (entry (comment (line)) (key) (text (line))))
 
 ===
 first has key comment 3 lines
@@ -22,7 +22,7 @@ first has key comment 3 lines
 	and another short paragraph
 key=value
 ---
-(file (entry (key_comment (line) (line) (line)) (SHORT_KEY) (line)))
+(file (entry (comment (line) (line) (line)) (key) (text (line))))
 
 ===
 first has gap and key comment
@@ -32,29 +32,37 @@ first has gap and key comment
 	about the key that follows
 key=value
 ---
-(file (entry (gap) (key_comment (line) (line)) (SHORT_KEY) (line)))
+(file (entry (gap) (comment (line) (line)) (key) (text (line))))
 
 ===
-the different entry types
+angle brackets open a text block
 ===
-<first key>
-	start of text block, just one linefeed
-	last line of text block
-# epilog comment about the text block above
-
-// the empty string can be a key
-[]
-	# prolog comment for this empty list
-
-{third {tricky} key}
-	key=value
-
-@for multi-line keys
-	use the at sign then empty brackets...
-{}
+<any <chars> # [except] @ {LF} allowed>
+	start of text block, just one LF char here:
+	the last line of text block has no LF at end
 ---
-(file
-  (entry (TEXT_KEY) (text (line) (line)) (epilog (line)))
-  (entry (gap) (key_comment (line)) (LIST_KEY) (list (prolog (line))))
-  (entry (gap) (DICT_KEY) (dict (entry (SHORT_KEY) (line))))
-  (entry (gap) (LONG_KEY (line) (line))))
+(file (entry (key) (text (line) (line))))
+
+===
+square brackets open a list context
+===
+[any <chars> # [except] @ {LF} allowed]
+---
+(file (entry (key) (list)))
+
+===
+curly brackets open a dictionary context
+===
+{any <chars> # [except] @ {LF} allowed}
+---
+(file (entry (key) (dict)))
+
+===
+keys can contain LF chars
+===
+@use this form for multi-line keys
+	after the key put empty (no key) brackets...
+<>
+	angle for text, square for list, curly for dict
+---
+(file (entry (key (line) (line)) (text (line))))

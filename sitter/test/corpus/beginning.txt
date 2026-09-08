@@ -6,34 +6,34 @@ empty file
 
 ===
 shebang alone empty
+:error
 ===
 #!
 ---
-(file (shebang (line)))
 
 ===
-shebang alone program only
+shebang alone interpreter only
 ===
 #!/usr/bin/env tindalwic
 ---
-(file (shebang (line)))
+(file (shebang (interpreter)))
 
 ===
-shebang alone program plus 1 line
+shebang alone plus 1 line
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
 ---
-(file (shebang (line) (line)))
+(file (shebang (interpreter) (line)))
 
 ===
-shebang alone program plus 2 lines
+shebang alone plus 2 lines
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
 	maybe create it?
 ---
-(file (shebang (line) (line) (line)))
+(file (shebang (interpreter) (line) (line)))
 
 ===
 prolog alone empty
@@ -69,7 +69,7 @@ shebang, prolog
 	and a short paragraph
 ---
 (file
-  (shebang (line) (line) (line))
+  (shebang (interpreter) (line) (line))
   (prolog (line) (line) (line)))
 
 ===
@@ -78,7 +78,7 @@ shebang, prolog that looks like shebang
 #!shebang
 #!prolog
 ---
-(file (shebang (line)) (prolog (line)))
+(file (shebang (interpreter)) (prolog (line)))
 
 ===
 prolog + shebang/comment
@@ -93,7 +93,7 @@ short key alone
 ===
 key=value
 ---
-(file (entry (SHORT_KEY) (line)))
+(file (entry (key) (text (line))))
 
 ===
 shebang, prolog, short key
@@ -103,6 +103,6 @@ shebang, prolog, short key
 key=value
 ---
 (file
-  (shebang (line))
+  (shebang (interpreter))
   (prolog (line))
-  (entry (SHORT_KEY) (line)))
+  (entry (key) (text (line))))
