@@ -56,5 +56,5 @@ the different entry types
 (file
   (entry (TEXT_KEY) (text (line) (line)) (epilog (line)))
   (entry (gap) (key_comment (line)) (LIST_KEY) (list (prolog (line))))
-  (entry (gap) (dict_key) (dict (entry (SHORT_KEY) (line))))
+  (entry (gap) (DICT_KEY) (dict (entry (SHORT_KEY) (line))))
   (entry (gap) (LONG_KEY (line) (line))))

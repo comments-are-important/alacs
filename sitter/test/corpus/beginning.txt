@@ -19,7 +19,7 @@ shebang alone program only
 (file (shebang (line)))
 
 ===
-shebang alone program + 1 line
+shebang alone program plus 1 line
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
@@ -27,7 +27,7 @@ shebang alone program + 1 line
 (file (shebang (line) (line)))
 
 ===
-shebang alone program + 2 lines
+shebang alone program plus 2 lines
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
@@ -59,7 +59,7 @@ prolog alone 3 lines
 (file (prolog (line) (line) (line)))
 
 ===
-shebang + prolog
+shebang, prolog
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
@@ -73,7 +73,7 @@ shebang + prolog
   (prolog (line) (line) (line)))
 
 ===
-shebang + prolog that looks like shebang
+shebang, prolog that looks like shebang
 ===
 #!shebang
 #!prolog
@@ -96,7 +96,7 @@ key=value
 (file (entry (SHORT_KEY) (line)))
 
 ===
-shebang + prolog + short key
+shebang, prolog, short key
 ===
 #!shebang
 #prolog

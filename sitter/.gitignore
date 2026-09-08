@@ -1,6 +1,10 @@
 /package-lock.json
 /node_modules/
-/src/
-!src/scanner.c
+/src/grammar.json
+/src/node-types.json
+/src/parser.c
+/src/tree_sitter/alloc.h
+/src/tree_sitter/array.h
+/src/tree_sitter/parser.h
 /parser.so
 /tree-sitter-tindalwic.wasm
