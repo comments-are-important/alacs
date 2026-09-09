@@ -15,6 +15,6 @@ one item of short text
 		#EXCEPT for 1st char
 ---
 (file (entry (key) (list
-  (item (text))
+  (item (text (line)))
   (item (text (line)))
 )))

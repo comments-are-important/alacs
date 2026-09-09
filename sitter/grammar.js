@@ -16,52 +16,49 @@ export default grammar({
     rules: {
 
         file: $ => seq(optional($.shebang), optional($.prolog), repeat($.entry)),
-
-        dict: $ => choice($._ELIDED, $._entries),
-        list: $ => choice($._ELIDED, $._items),
-        text: $ => choice($._ELIDED, $._lines),
-
-        _entries: $ => seq($._INDENT, optional($.prolog), repeat($.entry), $._DEDENT),
-        _items: $ => seq($._INDENT, optional($.prolog), repeat($.item), $._DEDENT),
-        _lines: $ => seq($._INDENT, $._first, repeat(seq($._CONTINUE, $._more)), $._DEDENT),
-        _spill: $ => seq($._INDENT, $._more, repeat(seq($._CONTINUE, $._more)), $._DEDENT),
+        dict: $ => seq($._INDENT, optional($.prolog), repeat($.entry), $._DEDENT),
+        list: $ => seq($._INDENT, optional($.prolog), repeat($.item), $._DEDENT),
+        text: $ => seq($._INDENT, optional($._string), $._DEDENT),
+        _flow: $ => seq($._INDENT, repeat($._another_line), $._DEDENT),
 
         line: $ => /[^\n]*/,
-        _first: $ => seq(/\n/, $._MARGIN, $.line), // RegExp is invisible to query,
-        _more: $ => seq('\n', $._MARGIN, $.line), // ... but literals can be injected
-        _flow: $ => seq($.line, optional($._spill)),
+        _another_line: $ => seq($._CONTINUE, '\n', $._MARGIN, $.line),
+        _string: $ => seq($._CONTINUE, /\n/, $._MARGIN, $.line, repeat($._another_line)),
 
-        gap: $ => seq($._EMPTY_LINE, $._NEW_LINE),
-        prolog: $ => seq($._SOME_LINE, $._NEW_LINE, $._MARGIN, '#', $._flow),
-        epilog: $ => seq($._SOME_LINE, $._NEW_LINE, $._MARGIN, '#', $._flow),
-        comment: $ => seq($._SOME_LINE, $._NEW_LINE, $._MARGIN, '//', $._flow),
+        prolog: $ => seq($._PEEK_SOME, $._NEW_LINE, $._MARGIN, '#', $.line, optional($._flow)),
+        epilog: $ => seq($._PEEK_SOME, $._NEW_LINE, $._MARGIN, '#', $.line, optional($._flow)),
+        comment: $ => seq($._PEEK_SOME, $._NEW_LINE, $._MARGIN, '//', $.line, optional($._flow)),
+        shebang: $ => seq($._PEEK_SOME, $._NEW_LINE, $._MARGIN, '#!', $.interpreter, optional($._flow)),
         interpreter: $ => /[^\n]+/,
-        shebang: $ => seq($._SOME_LINE, $._NEW_LINE, $._MARGIN, '#!', $.interpreter, optional($._spill)),
 
         item: $ => seq(
-            $._SOME_LINE, $._NEW_LINE, $._MARGIN, choice($._value, alias($.SHORT_ITEM, $.text)),
+            $._PEEK_SOME, $._NEW_LINE, $._MARGIN, choice($._value, $._short_text),
             optional($.epilog),
         ),
+        short_line: $ => alias($.SHORT_STR, $.line),
+        _short_text: $ => alias($.short_line, $.text),
         _value: $ => choice(
             seq('<>', $.text),
             seq('[]', $.list),
             seq('{}', $.dict),
+            // can't put short item here (not allowed after '@')
         ),
 
         entry: $ => seq(
             optional($.gap),
             optional($.comment),
-            $._SOME_LINE, $._NEW_LINE, $._MARGIN, $._key_value,
+            $._PEEK_SOME, $._NEW_LINE, $._MARGIN, $._key_value,
             optional($.epilog),
         ),
-        key: $ => $._flow,
-        SHORT_VALUE: $ => $.line,
+        gap: $ => seq($._PEEK_EMPTY, $._NEW_LINE),
+        key: $ => seq($.line, optional($._flow)),
+        short_value: $ => $.line,
         _key_value: $ => choice(
             seq('@', $.key, /\n/, $._MARGIN, $._value),
             seq('<', alias($.TEXT_KEY, $.key), '>', $.text),
             seq('[', alias($.LIST_KEY, $.key), ']', $.list),
             seq('{', alias($.DICT_KEY, $.key), '}', $.dict),
-            seq(alias($.SHORT_KEY, $.key), '=', alias($.SHORT_VALUE, $.text)),
+            seq(alias($.SHORT_KEY, $.key), '=', alias($.short_value, $.text)),
         ),
 
     },
@@ -71,7 +68,8 @@ export default grammar({
         // more than one into `valid_symbols` for any single scanner call.
         $._NEW_LINE,   // LF or zero-width beginning of file
         $._MARGIN,     // the expected number of TABs starting at column 0
-        $.SHORT_ITEM,  // empty or /[^[:reserved_char:]][^\n]*/
+        $._INDENT,     // ++margin (unconditionally - rules are in charge)
+        $.SHORT_STR,  // empty or /[^[:reserved_char:]][^\n]*/
         $.SHORT_KEY,   // empty or /[^[:reserved_char:]][^=\n]*/ if peek('=')
         $.TEXT_KEY,    // rest of line if peek('>', EOF or LF)
         $.LIST_KEY,    // rest of line if peek(']', EOF or LF)
@@ -81,12 +79,10 @@ export default grammar({
         // remaining tokens help the rules determine the structure so scanner will be
         // asked to select from among them (sometimes one but often multiple).
         // until issue 5929 gets done all these must be zero-width
-        $._EMPTY_LINE, // if peek(NEW_LINE, EOF or LF)
-        $._SOME_LINE,  // if peek(NEW_LINE, !(EOF or LF))
-        $._INDENT,     // ++margin if peek(LF, more TABs than expected)
-        $._DEDENT,     // --margin if EOF or peek(LF, insufficient TABs)
+        $._PEEK_EMPTY, // if peek(NEW_LINE, EOF or LF)
+        $._PEEK_SOME,  // if peek(NEW_LINE, !(EOF or LF))
+        $._DEDENT,     // --margin if EOF or peek(LF, less than margin TABs)
         $._CONTINUE,   // if peek(LF, margin TABs or more)
-		$._ELIDED,     // if valid[INDENT] and peek(LF, margin TABs exactly)
     ],
 
     conflicts: $ => [[$.item], [$.entry]],

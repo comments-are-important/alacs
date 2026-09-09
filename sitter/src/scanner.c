@@ -35,7 +35,8 @@ enum TindalwicToken {
         // more than one into `valid_symbols` for any single scanner call.
         NEW_LINE,   // LF or zero-width beginning of file
         MARGIN,     // the expected number of TABs starting at column 0
-        SHORT_ITEM,  // empty or /[^[:reserved_char:]][^\n]*/
+        INDENT,     // ++margin if peek(LF, more TABs than expected)
+        SHORT_STR,  // empty or /[^[:reserved_char:]][^\n]*/
         SHORT_KEY,   // empty or /[^[:reserved_char:]][^=\n]*/ if peek('=')
         TEXT_KEY,    // rest of line if peek('>', EOF or LF)
         LIST_KEY,    // rest of line if peek(']', EOF or LF)
@@ -45,12 +46,10 @@ enum TindalwicToken {
         // remaining tokens help the rules determine the structure so scanner will be
         // asked to select from among them (sometimes one but often multiple).
         // until issue 5929 gets done all these must be zero-width
-        EMPTY_LINE, // if peek(NEW_LINE, EOF or LF)
-        SOME_LINE,  // if peek(NEW_LINE, !(EOF or LF))
-        INDENT,     // ++margin if peek(LF, more TABs than expected)
+        PEEK_EMPTY, // if peek(NEW_LINE, EOF or LF)
+        PEEK_SOME,  // if peek(NEW_LINE, !(EOF or LF))
         DEDENT,     // --margin if EOF or peek(LF, insufficient TABs)
         CONTINUE,   // if peek(LF, margin TABs or more)
-		ELIDED,     // if valid[INDENT] and peek(LF, margin TABs exactly)
 };
 
 static bool reserved_char(int32_t ch) {
@@ -88,17 +87,16 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
         beginning?0:scanner->margin, beginning?"*":"",
         valid_symbols[NEW_LINE]?" NEW_LINE":"",
         valid_symbols[MARGIN]?" MARGIN":"",
-        valid_symbols[SHORT_ITEM]?" SHORT_ITEM":"",
+        valid_symbols[INDENT]?" INDENT":"",
+        valid_symbols[SHORT_STR]?" SHORT_STR":"",
         valid_symbols[SHORT_KEY]?" SHORT_KEY":"",
         valid_symbols[TEXT_KEY]?" TEXT_KEY":"",
         valid_symbols[LIST_KEY]?" LIST_KEY":"",
         valid_symbols[DICT_KEY]?" DICT_KEY":"",
-        valid_symbols[EMPTY_LINE]?" EMPTY_LINE":"",
-        valid_symbols[SOME_LINE]?" SOME_LINE":"",
-        valid_symbols[INDENT]?" INDENT":"",
+        valid_symbols[PEEK_EMPTY]?" PEEK_EMPTY":"",
+        valid_symbols[PEEK_SOME]?" PEEK_SOME":"",
         valid_symbols[DEDENT]?" DEDENT":"",
         valid_symbols[CONTINUE]?" CONTINUE":"",
-		valid_symbols[ELIDED]?" ELIDED":"",
         ":"
     );
 
@@ -129,34 +127,40 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
             RETURN_true(NEW_LINE, " (virtual at beginning of file)");
         }
         if (lexer->lookahead != '\n')
-            RETURN_false(" (NEW_LINE only allowed after SOME_LINE|EMPTY_LINE - fix grammar)");
+            RETURN_false(" (NEW_LINE only allowed after PEEK_SOME|PEEK_EMPTY - fix grammar)");
         lexer->advance(lexer, false);
         lexer->mark_end(lexer);
         RETURN_true(NEW_LINE);
     }
 
     if (beginning) {
-        if (!(valid_symbols[SOME_LINE] && valid_symbols[EMPTY_LINE]))
-            RETURN_false(" (must begin with SOME_LINE|EMPTY_LINE - fix grammar)");
+        if (!(valid_symbols[PEEK_SOME] && valid_symbols[PEEK_EMPTY]))
+            RETURN_false(" (must begin with PEEK_SOME|PEEK_EMPTY - fix grammar)");
         if (lexer->eof(lexer))
             RETURN_false(" (empty file)");
         if (lexer->lookahead == '\n')
-            RETURN_true(EMPTY_LINE, " (at beginning of file)");
-        RETURN_true(SOME_LINE, " (at beginning of file)");
+            RETURN_true(PEEK_EMPTY, " (at beginning of file)");
+        RETURN_true(PEEK_SOME, " (at beginning of file)");
     }
 
-    if (valid_symbols[SHORT_ITEM]) {
+    if (valid_symbols[INDENT]) {
+        if (scanner->margin >= UINT32_MAX - 1)
+            RETURN_false(" (excessive INDENT)");
+        ++scanner->margin;
+        RETURN_true(INDENT);
+    }
+    if (valid_symbols[SHORT_STR]) {
         if (lexer->eof(lexer))
-            RETURN_true(SHORT_ITEM, " (at EOF)");
+            RETURN_true(SHORT_STR, " (at EOF)");
         if (lexer->lookahead == '\n')
-            RETURN_true(SHORT_ITEM, " (at EOL)");
+            RETURN_true(SHORT_STR, " (at EOL)");
         if (reserved_char(lexer->lookahead))
             RETURN_false(" (1st char is reserved)");
         lexer->advance(lexer, false);
         while (lexer->lookahead != '\n' && !lexer->eof(lexer))
             lexer->advance(lexer, false);
         lexer->mark_end(lexer);
-        RETURN_true(SHORT_ITEM);
+        RETURN_true(SHORT_STR);
     }
     if (valid_symbols[SHORT_KEY]) {
         if (lexer->eof(lexer))
@@ -215,15 +219,13 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
             --scanner->margin;
             RETURN_true(DEDENT, " (at EOF)");
         }
-        if (valid_symbols[ELIDED] && valid_symbols[INDENT])
-            RETURN_true(ELIDED, " (at EOF)");
         RETURN_false(" (at EOF)");
     }
     if (lexer->lookahead != '\n')
         RETURN_false(" (non-LF 0x%X - fix grammar)", lexer->lookahead);
     lexer->advance(lexer, false);
-    if (valid_symbols[EMPTY_LINE] && lexer->lookahead == '\n')
-        RETURN_true(EMPTY_LINE);
+    if (valid_symbols[PEEK_EMPTY] && lexer->lookahead == '\n')
+        RETURN_true(PEEK_EMPTY);
     for (uint32_t need = scanner->margin ; need != 0 ; --need) {
         if (lexer->lookahead == '\t') {
             lexer->advance(lexer, false);
@@ -238,15 +240,7 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
     }
     if (valid_symbols[CONTINUE])
         RETURN_true(CONTINUE);
-    if (valid_symbols[INDENT] && lexer->lookahead == '\t') {
-        if (scanner->margin >= UINT32_MAX - 1)
-            RETURN_false(" (excessive INDENT)");
-        ++scanner->margin;
-        RETURN_true(INDENT);
-    }
-    if (valid_symbols[ELIDED] && valid_symbols[INDENT])
-        RETURN_true(ELIDED);
-    if (valid_symbols[SOME_LINE])
-        RETURN_true(SOME_LINE);
+    if (valid_symbols[PEEK_SOME])
+        RETURN_true(PEEK_SOME);
     RETURN_false(" (nothing matched)");
 }
