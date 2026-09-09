@@ -30,29 +30,27 @@ void tree_sitter_tindalwic_external_scanner_deserialize(void *payload, const cha
 
 // don't edit the token list here, copy-n-paste from grammar, strip prefixes, then
 // copy-n-paste-n-tweak to the big `DEBUG_log` near top of scan and count the `%s`.
+// make sure INDENT/DEDENT stay straddling the demarcation of exclusive tokens.
 enum TindalwicToken {
-        // first group of tokens are mutually exclusive. grammar rules must never allow
-        // more than one into `valid_symbols` for any single scanner call.
-        NEW_LINE,   // LF or zero-width beginning of file
-        MARGIN,     // the expected number of TABs starting at column 0
-        INDENT,     // ++margin if peek(LF, more TABs than expected)
-        SHORT_STR,  // empty or /[^[:reserved_char:]][^\n]*/
-        SHORT_KEY,   // empty or /[^[:reserved_char:]][^=\n]*/ if peek('=')
+        // most tokens are mutually exclusive: grammar rules must
+        // never ask for more than one from any single scanner call.
+        NEW_LINE,    // LF or zero-width beginning of file
+        MARGIN,      // the expected number of TABs starting at column 0
+        SHORT_STR,   // empty or /[^#/@=<>{}\[\]\n\t][^\n]*/
+        SHORT_KEY,   // empty or /[^#/@=<>{}\[\]\n\t][^=\n]*/ if peek('=')
         TEXT_KEY,    // rest of line if peek('>', EOF or LF)
-        LIST_KEY,    // rest of line if peek(']', EOF or LF)
         DICT_KEY,    // rest of line if peek('}', EOF or LF)
-        // sentinel marks end of exclusive group, must not be used in any rule
-        RECOVERY,    // indicates error condition call
-        // remaining tokens help the rules determine the structure so scanner will be
-        // asked to select from among them (sometimes one but often multiple).
+        LIST_KEY,    // rest of line if peek(']', EOF or LF)
+        INDENT,      // ++margin zero-width
+        // remaining tokens help the rules determine the structure: scanner
+        // will be asked to select from among more than one of them.
         // until issue 5929 gets done all these must be zero-width
-        PEEK_EMPTY, // if peek(NEW_LINE, EOF or LF)
-        PEEK_SOME,  // if peek(NEW_LINE, !(EOF or LF))
-        DEDENT,     // --margin if EOF or peek(LF, insufficient TABs)
-        CONTINUE,   // if peek(LF, margin TABs or more)
+        DEDENT,      // --margin if EOF or peek(LF, not enough TABs)
+        PEEK_EMPTY,  // if peek(NEW_LINE, EOF or LF)
+        PEEK_MARGIN, // if peek(NEW_LINE, margin TABS)
 };
 
-static bool reserved_char(int32_t ch) {
+static bool special_char(int32_t ch) {
     switch (ch) {
         case '\n': case '\t': case '#': case '/': case '@': case '=':
         case '<': case '>': case '[': case ']': case '{': case '}':
@@ -73,30 +71,34 @@ static bool key_closed(char marker, TSLexer *lexer) {
 bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
     TindalwicScanner *scanner = (TindalwicScanner *)payload;
     bool beginning = scanner->margin == UINT32_MAX;
+    unsigned exclusive = 0;
+    for (enum TindalwicToken token = 0 ; token < DEDENT ; ++token)
+        if (valid_symbols[token])
+            ++exclusive;
 
     #define DEBUG_log(...) lexer->log(lexer, __VA_ARGS__)
-    if (valid_symbols[RECOVERY]) {
+    if (exclusive > 1) {
         DEBUG_log(
-            "scanner.%d%s =>false (error recovery)",
-            beginning?0:scanner->margin, beginning?"*":""
+            "scanner.%u%s =>false (%s)",
+            beginning?0:scanner->margin, beginning?"*":"",
+            (exclusive == DEDENT)?"error recovery":"exclusivity violation - fix grammar"
         );
         return false;
     }
     DEBUG_log(
-        "scanner.%d%s %s%s%s%s%s%s%s%s%s%s%s%s %s",
+        "scanner.%u%s %s%s%s%s%s%s%s%s%s%s%s %s",
         beginning?0:scanner->margin, beginning?"*":"",
         valid_symbols[NEW_LINE]?" NEW_LINE":"",
         valid_symbols[MARGIN]?" MARGIN":"",
-        valid_symbols[INDENT]?" INDENT":"",
         valid_symbols[SHORT_STR]?" SHORT_STR":"",
         valid_symbols[SHORT_KEY]?" SHORT_KEY":"",
         valid_symbols[TEXT_KEY]?" TEXT_KEY":"",
-        valid_symbols[LIST_KEY]?" LIST_KEY":"",
         valid_symbols[DICT_KEY]?" DICT_KEY":"",
-        valid_symbols[PEEK_EMPTY]?" PEEK_EMPTY":"",
-        valid_symbols[PEEK_SOME]?" PEEK_SOME":"",
+        valid_symbols[LIST_KEY]?" LIST_KEY":"",
+        valid_symbols[INDENT]?" INDENT":"",
         valid_symbols[DEDENT]?" DEDENT":"",
-        valid_symbols[CONTINUE]?" CONTINUE":"",
+        valid_symbols[PEEK_EMPTY]?" PEEK_EMPTY":"",
+        valid_symbols[PEEK_MARGIN]?" PEEK_MARGIN":"",
         ":"
     );
 
@@ -108,53 +110,49 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
         lexer->result_symbol = symbol; \
         return true; }
 
-    unsigned exclusive = 0;
-    // it's very difficult to know which symbols will be requested together: an edit
-    // to the rules that seems innocuous could introduce an exclusivity violation.
-    // better to have a clear log message than let the code paint itself into a corner
-    // with a series of advance/lookahead/mark_end steps that can't be rolled back.
-    for (enum TindalwicToken token = 0 ; token < RECOVERY ; ++token)
-        if (valid_symbols[token])
-            ++exclusive;
-    if (exclusive > 1)
-        RETURN_false(" (%u exclusive symbols requested - fix grammar)", exclusive);
-
-    lexer->mark_end(lexer); // we will be doing a lot of peeking ahead
-
     if (valid_symbols[NEW_LINE]) {
         if (beginning) {
             scanner->margin = 0;
             RETURN_true(NEW_LINE, " (virtual at beginning of file)");
         }
         if (lexer->lookahead != '\n')
-            RETURN_false(" (NEW_LINE only allowed after PEEK_SOME|PEEK_EMPTY - fix grammar)");
+            RETURN_false(" (NEW_LINE must follow PEEK_MARGIN|PEEK_EMPTY - fix grammar)");
         lexer->advance(lexer, false);
-        lexer->mark_end(lexer);
         RETURN_true(NEW_LINE);
     }
-
     if (beginning) {
-        if (!(valid_symbols[PEEK_SOME] && valid_symbols[PEEK_EMPTY]))
-            RETURN_false(" (must begin with PEEK_SOME|PEEK_EMPTY - fix grammar)");
+        if (!(valid_symbols[PEEK_MARGIN] && valid_symbols[PEEK_EMPTY]))
+            RETURN_false(" (must begin with PEEK_MARGIN|PEEK_EMPTY - fix grammar)");
         if (lexer->eof(lexer))
             RETURN_false(" (empty file)");
         if (lexer->lookahead == '\n')
             RETURN_true(PEEK_EMPTY, " (at beginning of file)");
-        RETURN_true(PEEK_SOME, " (at beginning of file)");
+        RETURN_true(PEEK_MARGIN, " (at beginning of file)");
     }
 
-    if (valid_symbols[INDENT]) {
-        if (scanner->margin >= UINT32_MAX - 1)
-            RETURN_false(" (excessive INDENT)");
-        ++scanner->margin;
-        RETURN_true(INDENT);
+    lexer->mark_end(lexer); // we will be doing a lot of peeking ahead
+
+    if (valid_symbols[MARGIN]) {
+        uint32_t column = lexer->get_column(lexer);
+        if (column != 0)
+            RETURN_false(" (rule asking for margin at column %u - fix grammar)", column);
+        for (uint32_t need = scanner->margin ; need != 0 ; --need) {
+            // peek/dedent code duplicates loop and the `if` that follows (keep in sync)
+            if (lexer->lookahead == '\t') {
+                lexer->advance(lexer, false);
+                continue;
+            }
+            RETURN_false(" (non-TAB 0x%X)", lexer->lookahead);
+        }
+        lexer->mark_end(lexer);
+        RETURN_true(MARGIN);
     }
     if (valid_symbols[SHORT_STR]) {
         if (lexer->eof(lexer))
             RETURN_true(SHORT_STR, " (at EOF)");
         if (lexer->lookahead == '\n')
             RETURN_true(SHORT_STR, " (at EOL)");
-        if (reserved_char(lexer->lookahead))
+        if (special_char(lexer->lookahead))
             RETURN_false(" (1st char is reserved)");
         lexer->advance(lexer, false);
         while (lexer->lookahead != '\n' && !lexer->eof(lexer))
@@ -167,7 +165,7 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
             RETURN_true(SHORT_KEY, " (at EOF)");
         if (lexer->lookahead == '\n')
             RETURN_true(SHORT_KEY, " (at EOL)");
-        if (reserved_char(lexer->lookahead))
+        if (special_char(lexer->lookahead))
             RETURN_false(" (1st char is reserved)");
         lexer->advance(lexer, false);
         while (lexer->lookahead != '\n' && !lexer->eof(lexer)) {
@@ -184,29 +182,22 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
             RETURN_false(" (not closed)");
         RETURN_true(TEXT_KEY);
     }
-    if (valid_symbols[LIST_KEY]) {
-        if (!key_closed(']', lexer))
-            RETURN_false(" (not closed)");
-        RETURN_true(LIST_KEY);
-    }
     if (valid_symbols[DICT_KEY]) {
         if (!key_closed('}', lexer))
             RETURN_false(" (not closed)");
         RETURN_true(DICT_KEY);
     }
-    if (valid_symbols[MARGIN]) {
-        uint32_t column = lexer->get_column(lexer);
-        if (column != 0)
-            RETURN_false(" (rule asking for margin at column %u - fix grammar)", column);
-        for (uint32_t need = scanner->margin ; need != 0 ; --need) {
-            if (lexer->lookahead == '\t') {
-                lexer->advance(lexer, false);
-                continue;
-            }
-            RETURN_false(" (non-TAB 0x%X)", lexer->lookahead);
-        }
-        lexer->mark_end(lexer);
-        RETURN_true(MARGIN);
+    if (valid_symbols[LIST_KEY]) {
+        if (!key_closed(']', lexer))
+            RETURN_false(" (not closed)");
+        RETURN_true(LIST_KEY);
+    }
+
+    if (valid_symbols[INDENT]) {
+        if (scanner->margin >= UINT32_MAX - 1)
+            RETURN_false(" (excessive INDENT)");
+        ++scanner->margin;
+        RETURN_true(INDENT);
     }
 
     if (exclusive != 0)
@@ -222,11 +213,12 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
         RETURN_false(" (at EOF)");
     }
     if (lexer->lookahead != '\n')
-        RETURN_false(" (non-LF 0x%X - fix grammar)", lexer->lookahead);
+        RETURN_false(" (peek/dedent at LF, not 0x%X - fix grammar)", lexer->lookahead);
     lexer->advance(lexer, false);
     if (valid_symbols[PEEK_EMPTY] && lexer->lookahead == '\n')
         RETURN_true(PEEK_EMPTY);
     for (uint32_t need = scanner->margin ; need != 0 ; --need) {
+        // MARGIN code duplicates loop and the `if` that follows (keep in sync)
         if (lexer->lookahead == '\t') {
             lexer->advance(lexer, false);
             continue;
@@ -238,9 +230,7 @@ bool tree_sitter_tindalwic_external_scanner_scan(void *payload, TSLexer *lexer, 
         --scanner->margin;
         RETURN_true(DEDENT);
     }
-    if (valid_symbols[CONTINUE])
-        RETURN_true(CONTINUE);
-    if (valid_symbols[PEEK_SOME])
-        RETURN_true(PEEK_SOME);
+    if (valid_symbols[PEEK_MARGIN])
+        RETURN_true(PEEK_MARGIN);
     RETURN_false(" (nothing matched)");
 }

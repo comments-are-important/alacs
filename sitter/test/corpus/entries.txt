@@ -60,8 +60,9 @@ curly brackets open a dictionary context
 ===
 keys can contain LF chars
 ===
-@use this form for multi-line keys
-	after the key put empty (no key) brackets...
+@
+	this key has 2 lines
+	after the key put empty brackets...
 <>
 	angle for text, square for list, curly for dict
 ---

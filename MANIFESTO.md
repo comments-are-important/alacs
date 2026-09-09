@@ -3,9 +3,10 @@
  + This is meant to be an informal description of the format.
  + See the [README](README.md) for links to other documentation.
 
-A formal spec is tricky to write and would likely not be very helpful. More information
-about that can be found in the non-normative [tindalwic.abnf](tindalwic.abnf) file.
-
+The code in [main/src/parse.rs](main/src/parse.rs) is authoritative: the format is
+officially just whatever that code accepts.
+There is a [tree-sitter grammar](sitter/grammar.js) if you prefer to learn about the
+format from a BNF.
 
 ## Line Oriented Pattern Matching
 
