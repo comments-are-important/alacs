@@ -99,3 +99,19 @@ key=value
   (shebang (line))
   (prolog (line))
   (entry (key) (text (line))))
+
+===
+dedent works everywhere
+===
+[]
+	[]
+	[]
+		[]
+[]
+---
+(file
+  	(entry (key) (list
+    	(item (list)) (item (list (item (list)))
+	)))
+	(entry (key) (list))
+)

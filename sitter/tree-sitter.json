@@ -4,7 +4,8 @@
     {
       "name": "tindalwic",
       "scope": "text.tindalwic",
-      "file-types": [ "tindalwic" ]
+      "file-types": [ "tindalwic" ],
+      "highlights": "queries/highlights.scm"
     }
   ],
   "metadata": {

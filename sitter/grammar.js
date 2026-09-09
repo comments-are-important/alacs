@@ -4,6 +4,16 @@ export default grammar({
 
     name: "tindalwic", // text in nested dictionaries and lists with important comments
 
+    // the official Rust parser should be used if possible. this parser exists:
+    //   + to provide syntax highlighting for the various editors to use.
+    //   + as an educational aid for people comfortable reading this kind of grammar.
+    //     the Rust file is 600 lines, and the format syntax is somewhat obscured by
+    //     concerns (like zero-copy). this file is 100 lines and works at a higher level
+    //     of abstraction (the tricky details are out of the way in the scanner code).
+    // biggest difference from the Rust is the shape of the tree. in Rust the `epilog`
+    // sits right next to the `prolog`, but here they are in parent/child nodes. a minor
+    // annoyance that is acceptable given the intended purposes of this grammar.
+
     rules: {
 
         // outermost context is a dictionary after an optional `#!`:

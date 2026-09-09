@@ -67,19 +67,3 @@ keys can contain LF chars
 	angle for text, square for list, curly for dict
 ---
 (file (entry (key (line) (line)) (text (line))))
-
-===
-elide works everywhere
-===
-[]
-	[]
-	[]
-		[]
-[]
----
-(file
-  	(entry (key) (list
-    	(item (list)) (item (list (item (list)))
-	)))
-	(entry (key) (list))
-)
