@@ -18,16 +18,6 @@
                 "filter": { "name": "rand", "kind": "bench" }
             },
             "cwd": "${workspaceFolder}/rust"
-        },
-        {
-            "name": "tindalwic_test __main__",
-            "type": "debugpy",
-            "request": "launch",
-            "cwd": "${workspaceFolder}/python",
-            "module": "tindalwic_test",
-            "args": ["--failures=../zzz", "--loops=4000"],
-            "console": "integratedTerminal",
-            "justMyCode": true
         }
     ]
 }

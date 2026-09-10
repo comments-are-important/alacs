@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "tindalwic"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bumpalo",
  "markdown",
@@ -449,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "tindalwic-macros"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -457,21 +457,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "tindalwic-serde"
-version = "0.5.0"
-dependencies = [
- "bumpalo",
- "bytes",
- "rstest",
- "ryu",
- "serde",
- "serde_json",
- "tindalwic",
-]
-
-[[package]]
-name = "tindalwic-webapp"
-version = "0.5.0"
+name = "tindalwic-playground"
+version = "0.5.1"
 dependencies = [
  "bumpalo",
  "console_error_panic_hook",
@@ -484,6 +471,19 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "yaml_serde",
+]
+
+[[package]]
+name = "tindalwic-serde"
+version = "0.5.1"
+dependencies = [
+ "bumpalo",
+ "bytes",
+ "rstest",
+ "ryu",
+ "serde",
+ "serde_json",
+ "tindalwic",
 ]
 
 [[package]]

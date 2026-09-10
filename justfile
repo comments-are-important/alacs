@@ -1,4 +1,3 @@
-# list justfile targets
 
 set shell := ["bash", "-uc"]
 
@@ -12,16 +11,6 @@ all: fmt (test "-q") webapp coverage doc api lines msrv
     [[ -e /tmp/.devcontainerId \
        && -v TINDALWIC_CID \
        && "$(< /tmp/.devcontainerId)" == "$TINDALWIC_CID" ]]
-
-@_nightly: _is_running_inside_devcontainer
-    rustup toolchain list \
-      | grep -q nightly \
-      || rustup toolchain install nightly
-
-@_wasm: _is_running_inside_devcontainer
-    rustup target list --installed \
-      | grep -q wasm32-unknown-unknown \
-      || rustup target add wasm32-unknown-unknown
 
 @_install crate: _is_running_inside_devcontainer
     cargo install --list \
@@ -49,14 +38,14 @@ test *OPTS: _is_running_inside_devcontainer
       {{ if OPTS =~ quiet { '2> >(grep --line-buffered -P "^'+color+'test '+color+'tests/trybuild/.*[^o][^k]$")' } else {''} }}
     cargo test -p tindalwic-serde --test serde {{OPTS}}
 
-coverage: _is_running_inside_devcontainer (_install "cargo-llvm-cov") _nightly
+coverage: _is_running_inside_devcontainer (_install "cargo-llvm-cov")
     yes | LLVM_COV_FLAGS="--show-expansions --show-instantiations" \
       cargo +nightly llvm-cov --html --branch -p tindalwic --test unit --all-features --show-missing-lines
 
 doc: _is_running_inside_devcontainer
     cargo doc --all-features --no-deps --document-private-items
 
-fmt: _is_running_inside_devcontainer _nightly
+fmt: _is_running_inside_devcontainer
     cargo +nightly fmt
 
 msrv: _is_running_inside_devcontainer (_install "cargo-msrv")
@@ -65,7 +54,7 @@ msrv: _is_running_inside_devcontainer (_install "cargo-msrv")
     cargo msrv verify --path serde/
     cargo msrv verify --path webapp/
 
-webapp: _is_running_inside_devcontainer _wasm (_install "wasm-opt")
+webapp: _is_running_inside_devcontainer (_install "wasm-opt")
     cargo build -p tindalwic-webapp --target wasm32-unknown-unknown --profile dev
     cargo build -p tindalwic-webapp --target wasm32-unknown-unknown --profile release-small
     just _install_version wasm-bindgen-cli "$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$=\1=')"
@@ -81,7 +70,7 @@ webapp: _is_running_inside_devcontainer _wasm (_install "wasm-opt")
     cd target/webapp-release ; wasm-opt -Oz --enable-bulk-memory \
       -o tindalwic_webapp_bg.wasm tindalwic_webapp_bg.wasm
 
-api: _is_running_inside_devcontainer (_install "cargo-public-api") _nightly
+api: _is_running_inside_devcontainer (_install "cargo-public-api")
     mkdir -p target/public-api/{all,default}
     cargo public-api -p tindalwic --target-dir target/public-api/default \
       >target/public-api/tindalwic-default.api
@@ -101,7 +90,7 @@ lines: _is_running_inside_devcontainer (_install "cargo-llvm-lines")
 
 setup: _is_running_outside_devcontainer
     code --install-extension ms-vscode-remote.remote-containers
-    docker pull mcr.microsoft.com/devcontainers/typescript-node
+    docker pull mcr.microsoft.com/devcontainers/rust:2-trixie
 
 down: _is_running_outside_devcontainer
     docker rm -f tindalwic-devcontainer-vscode

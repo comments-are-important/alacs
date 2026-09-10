@@ -13,7 +13,7 @@ bumpalo = { workspace = true }
 bytes = { workspace = true, features = ["serde"]}
 ryu = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-tindalwic = { path = "../main", features = ["bumpalo"] }
+tindalwic = { path = "../core", features = ["bumpalo"] }
 
 [dev-dependencies]
 rstest = { workspace = true }

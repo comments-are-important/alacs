@@ -1,0 +1,31 @@
+{
+  "name": "tindalwic",
+  "runArgs": [
+    "--name=tindalwic-devcontainer-vscode"
+  ],
+  "image": "mcr.microsoft.com/devcontainers/rust:2-trixie",
+  "features": {
+    "ghcr.io/devcontainers/features/node:2": {
+      "installYarnUsingApt": true,
+      "nodeGypDependencies": false
+    }
+  },
+  "containerEnv": {
+    "TINDALWIC_CID": "${devcontainerId}"
+  },
+  "onCreateCommand": {
+    "id": "echo -n '${devcontainerId}' >/tmp/.devcontainerId",
+    "rustup": "rustup toolchain install nightly && rustup target add wasm32-unknown-unknown",
+    "binstall": "curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "editorconfig.editorconfig",
+        "rust-lang.rust-analyzer",
+        "streetsidesoftware.code-spell-checker",
+        "vadimcn.vscode-lldb"
+      ]
+    }
+  }
+}

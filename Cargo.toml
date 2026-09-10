@@ -1,9 +1,9 @@
 [workspace]
-members = ["macros", "main", "serde", "webapp"]
+members = ["macros", "core", "serde", "playground"]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.81"
 authors = ["Comments Are Important <comments.are.important@gmail.com>"]

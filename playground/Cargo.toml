@@ -1,5 +1,5 @@
 [package]
-name = "tindalwic-webapp"
+name = "tindalwic-playground"
 description = "a simple tindalwic browser app"
 version = { workspace = true }
 edition = { workspace = true }
@@ -17,7 +17,7 @@ console_error_panic_hook = { workspace = true }
 js-sys = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
-tindalwic = { path = "../main", features = ["bumpalo"] }
+tindalwic = { path = "../core", features = ["bumpalo"] }
 tindalwic-serde = { path = "../serde" }
 toml_edit = { workspace = true, features = ["serde"] }
 wasm-bindgen = { workspace = true }
