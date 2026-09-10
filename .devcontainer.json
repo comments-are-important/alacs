@@ -15,7 +15,8 @@
   },
   "onCreateCommand": {
     "id": "echo -n '${devcontainerId}' >/tmp/.devcontainerId",
-    "rustup": "rustup toolchain install nightly && rustup target add wasm32-unknown-unknown",
+    "rustup": "rustup toolchain install nightly && rustup component add --toolchain nightly rustfmt && rustup target add wasm32-unknown-unknown",
+    "just": "mkdir -p /home/vscode/.local/bin && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /home/vscode/.local/bin",
     "binstall": "curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash"
   },
   "customizations": {

@@ -18,6 +18,7 @@
         "serde",
         "TAOCP",
         "tindalwic",
+        "trixie",
         "trybuild",
         "vadimcn"
     ],

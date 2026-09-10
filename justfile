@@ -1,7 +1,7 @@
 
 set shell := ["bash", "-uc"]
 
-all: fmt (test "-q") webapp coverage doc api lines msrv
+all: fmt (test "-q") playground coverage doc api lines msrv
 
 @_is_running_outside_devcontainer:
     [[ ! ( -e /tmp/.devcontainerId \
@@ -19,7 +19,7 @@ all: fmt (test "-q") webapp coverage doc api lines msrv
 
 @_install_version crate version: _is_running_inside_devcontainer
     cargo install --list \
-      | grep -q "{{ crate }} v{{ version }}" \
+      | grep -q "^{{ crate }} v{{ version }}:$" \
       || cargo binstall --no-confirm --only-signed --disable-telemetry {{ crate }} --version {{ version }}
 
 # -----------------------------------------------------------------------------
@@ -49,26 +49,27 @@ fmt: _is_running_inside_devcontainer
     cargo +nightly fmt
 
 msrv: _is_running_inside_devcontainer (_install "cargo-msrv")
-    cargo msrv verify --path macros/
-    cargo msrv verify --path main/
-    cargo msrv verify --path serde/
-    cargo msrv verify --path webapp/
+    #!/usr/bin/env bash
+    for path in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].manifest_path')
+    do
+      cargo msrv verify --path "$(dirname $path)"
+    done
 
-webapp: _is_running_inside_devcontainer (_install "wasm-opt")
-    cargo build -p tindalwic-webapp --target wasm32-unknown-unknown --profile dev
-    cargo build -p tindalwic-webapp --target wasm32-unknown-unknown --profile release-small
+playground: _is_running_inside_devcontainer (_install "wasm-opt")
+    cargo build -p tindalwic-playground --target wasm32-unknown-unknown --profile dev
+    cargo build -p tindalwic-playground --target wasm32-unknown-unknown --profile release-small
     just _install_version wasm-bindgen-cli "$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$=\1=')"
     wasm-bindgen --target web --keep-debug \
-      --out-dir target/webapp-dev \
-      target/wasm32-unknown-unknown/debug/tindalwic_webapp.wasm
+      --out-dir target/playground-dev \
+      target/wasm32-unknown-unknown/debug/tindalwic_playground.wasm
     wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section \
-      --out-dir target/webapp-release \
-      target/wasm32-unknown-unknown/release-small/tindalwic_webapp.wasm
-    cp webapp/favicon.ico target/
-    cp webapp/{index.html,favicon.ico} target/webapp-dev/
-    cp webapp/{index.html,favicon.ico} target/webapp-release/
-    cd target/webapp-release ; wasm-opt -Oz --enable-bulk-memory \
-      -o tindalwic_webapp_bg.wasm tindalwic_webapp_bg.wasm
+      --out-dir target/playground-release \
+      target/wasm32-unknown-unknown/release-small/tindalwic_playground.wasm
+    cp playground/favicon.ico target/
+    cp playground/{index.html,favicon.ico} target/playground-dev/
+    cp playground/{index.html,favicon.ico} target/playground-release/
+    cd target/playground-release ; wasm-opt -Oz --enable-bulk-memory \
+      -o tindalwic_playground_bg.wasm tindalwic_playground_bg.wasm
 
 api: _is_running_inside_devcontainer (_install "cargo-public-api")
     mkdir -p target/public-api/{all,default}
@@ -88,13 +89,23 @@ lines: _is_running_inside_devcontainer (_install "cargo-llvm-lines")
 
 # -----------------------------------------------------------------------------
 
+sitter:
+  #!/usr/bin/env bash
+  set -xe
+  cd grammar
+  npx tree-sitter --version || npm ci
+  npx tree-sitter generate
+  npx tree-sitter build -o ../target/tree-sitter-tindalwic.so
+  npx tree-sitter build --wasm -o ../target/tree-sitter-tindalwic.wasm
+
+# -----------------------------------------------------------------------------
+
 setup: _is_running_outside_devcontainer
     code --install-extension ms-vscode-remote.remote-containers
-    docker pull mcr.microsoft.com/devcontainers/rust:2-trixie
 
 down: _is_running_outside_devcontainer
     docker rm -f tindalwic-devcontainer-vscode
-    docker image rm $(docker image ls -q --filter "reference=vsc-tindalwic*")
+    docker image rm $(docker image ls -q --filter "reference=vsc-tindalwic-*")
 
 httpd: _is_running_outside_devcontainer
     cd target ; python -m http.server >&http.server.log
